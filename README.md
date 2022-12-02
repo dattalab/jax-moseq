@@ -1,5 +1,6 @@
-# Jax MoSeq
+# JAX MoSeq
 
+Code for fitting state-space models with Gibbs sampling. 
 
 ## Installation
 
