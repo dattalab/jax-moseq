@@ -1,7 +1,7 @@
-import jax, jax.numpy as jnp, jax.random as jr
+import jax
+import jax.numpy as jnp
+import jax.random as jr
 na = jnp.newaxis
-
-
 
 def kalman_filter(ys, mask, zs, m0, S0, A, B, Q, C, D, Rs):
     """

@@ -27,11 +27,14 @@ def sample_mn(seed, M, U, V):
 
 def sample_invwishart(seed,S,nu):
     n = S.shape[0]
-    chol = jnp.linalg.cholesky(S)
+    
     chi2_seed, norm_seed = jr.split(seed)
-    x = jnp.diag(jnp.sqrt(sample_chi2(chi2_seed, nu-jnp.arange(n))))
+    x = jnp.diag(jnp.sqrt(sample_chi2(chi2_seed, nu - jnp.arange(n))))
     x = x.at[jnp.triu_indices_from(x,1)].set(jr.normal(norm_seed, (n*(n-1)//2,)))
     R = jnp.linalg.qr(x,'r')
+    
+    chol = jnp.linalg.cholesky(S)
+    
     T = jax.scipy.linalg.solve_triangular(R.T,chol.T,lower=True).T
     return jnp.dot(T,T.T)
 
@@ -39,8 +42,6 @@ def sample_mniw(seed, nu, S, M, K):
     sigma = sample_invwishart(seed, S, nu)
     A = sample_mn(seed, M, sigma, K)
     return A, sigma
-
-
 
 def sample_hmm_stateseq(seed, log_likelihoods, mask, pi):
     """
@@ -79,5 +80,3 @@ def sample_hmm_stateseq(seed, log_likelihoods, mask, pi):
     init_potential = jnp.ones(pi.shape[0])
     _,stateseq = jax.lax.scan(_backward_message, (seed,init_potential), (alphan,mask), reverse=True)
     return stateseq, log_likelihood
-
-
