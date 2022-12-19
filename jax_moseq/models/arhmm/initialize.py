@@ -47,10 +47,10 @@ def init_model(data=None,
                seed=jr.PRNGKey(0),
                verbose=False,
                **kwargs):
-    if not states:
-        if not data:
-            raise ValueError('Must provide either `data` or '
-                             'both `states`.')
+    if not (data or states):
+        raise ValueError('Must provide either `data` or `states`.')
+
+    if data:
         x, mask = data['x'], data['mask']
         
     if isinstance(seed, int):
@@ -58,14 +58,14 @@ def init_model(data=None,
 
     if hypparams is None:
         if verbose:
-            print('ARHMM: Initializing hyperparameters.')
+            print('ARHMM: Initializing hyperparameters')
         hypparams = init_hyperparams(**kwargs)
     else:
         hypparams = device_put_as_scalar(hypparams)
     
     if params is None:
         if verbose:
-            print('ARHMM: Initializing parameters.')
+            print('ARHMM: Initializing parameters')
         params = init_params(seed, **hypparams)
     else:
         params = jax.device_put(params)

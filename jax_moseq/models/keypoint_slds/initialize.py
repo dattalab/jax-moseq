@@ -53,22 +53,23 @@ def init_model(data=None,
                pca=None,
                verbose=False,
                **kwargs):
-    if not (params and states):
-        if not data:
-            raise ValueError('Must provide either `data` or '
-                             'both `params` and `states`.')
+    if not (data or (states and params)):
+        raise ValueError('Must provide either `data` or '
+                         'both `states` and `params`.')
+
+    if data:
         Y, mask = data['Y'], data['mask']
         conf = data.get('conf')
 
-        Y_flat, v, h = preprocess_for_pca(Y, mask, conf=conf, **kwargs)
-        kwargs['k'] = Y.shape[-2]
+        if not (states and params):
+            Y_flat, v, h = preprocess_for_pca(Y, mask, conf=conf, **kwargs)
+            kwargs['k'] = Y.shape[-2]
+    else:
+        conf = None
     
     if isinstance(seed, int):
         seed = jr.PRNGKey(seed)
 
-    # To initialize the hyperparameters, the user either
-    # needs to provide them directly or provide a dict for
-    # each of the hyperparameter categories.
     if hypparams is None:
         if verbose:
             print('Keypoint SLDS: Initializing hyperparameters')

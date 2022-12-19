@@ -71,10 +71,11 @@ def init_model(data=None,
                pca=None,
                verbose=False,
                **kwargs):
-    if not (params and states):
-        if not data:
-            raise ValueError('Must provide either `data` or '
-                             'both `params` and `states`.')
+    if not (data or (states and params)):
+        raise ValueError('Must provide either `data` or '
+                         'both `states` and `params`.')
+
+    if data:
         Y, mask = data['Y'], data['mask']
 
     if isinstance(seed, int):
