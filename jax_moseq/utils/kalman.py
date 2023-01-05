@@ -1,7 +1,11 @@
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+
+from jax_moseq.utils.autoregression import get_nlags
+
 na = jnp.newaxis
+
 
 def kalman_filter(ys, mask, zs, m0, S0, A, B, Q, C, D, Rs):
     """
@@ -83,3 +87,56 @@ def kalman_sample(seed, ys, mask, zs, m0, S0, A, B, Q, C, D, Rs):
     _, xs = jax.lax.scan(lambda carry,args: jax.lax.cond(
         args[0]>0, _step, _masked_step, carry, args[1:]), x, args, reverse=True)
     return jnp.vstack([xs, x])
+
+
+def ar_to_lds(Ab, Q, Cd=None):
+    """
+    Given a linear dynamical system with L'th-order autoregressive 
+    dynamics in R^D, returns a system with 1st-order dynamics in R^(D*L)
+    
+    Parameters
+    ----------  
+    Ab: jax array, shape (*dims, D, D*L + 1)
+        AR affine transform
+    Q: jax array, shape (*dims, D, D)
+        AR noise covariance
+    Cs: jax array, shape (*dims, D_obs, D)
+        obs transformation
+    
+    Returns
+    -------
+    As_: jax array, shape (*dims, D*L, D*L)
+    bs_: jax array, shape (*dims, D*L)    
+    Qs_: jax array, shape (*dims, D*L, D*L)  
+    Cs_: jax array, shape (*dims, D_obs, D*L)
+    """    
+    nlags = get_nlags(Ab)
+    latent_dim = Ab.shape[-2]
+    lds_dim = latent_dim * nlags
+    eye = jnp.eye(latent_dim * (nlags - 1))
+
+    A = Ab[..., :-1]
+    dims = A.shape[:-2]
+    A_ = jnp.zeros((*dims, lds_dim, lds_dim))
+    A_ = A_.at[..., :-latent_dim, latent_dim:].set(eye)
+    A_ = A_.at[..., -latent_dim:, :].set(A)
+
+    b = Ab[..., -1]
+    b_ = jnp.zeros((*dims, lds_dim))
+    b_ = b_.at[..., -latent_dim:].set(b)
+    
+    dims = Q.shape[:-2]
+    Q_ = jnp.zeros((*dims, lds_dim, lds_dim))
+    Q_ = Q_.at[..., :-latent_dim, :-latent_dim].set(eye * 1e-2)
+    Q_ = Q_.at[..., -latent_dim:, -latent_dim:].set(Q)
+    
+    if Cd is None:
+        return A_, b_, Q_
+    
+    C = Cd[..., :-1]
+    C_ = jnp.zeros((*C.shape[:-1], lds_dim))
+    C_ = C_.at[..., -latent_dim:].set(C)
+
+    d_ = Cd[..., -1]
+
+    return A_, b_, Q_, C_, d_

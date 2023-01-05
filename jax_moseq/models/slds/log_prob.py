@@ -11,77 +11,99 @@ na = jnp.newaxis
 
 def scale_log_prob(s, s_0, nu_s, **kwargs):
     """
-    Calculate the log probability of the noise scale for each keypoint
-    given the noise prior, which is a scaled inverse chi-square 
+    Calculate the log probability of the noise scale `s` for
+    each datapoint given the noise prior, which is a scaled
+    inverse chi-squared distribution.
 
     Parameters
-    ----------  
-    s: jax array, shape (*dims)
-        Noise scale for each keypoint at each time-step
-
-    s_0: float or jax array, shape (*dims)
-        Prior on noise scale - either a single universal value or a 
-        separate prior for each keypoint at each time-step
-
-    nu_s: int
-        Degrees of freedom
+    ----------
+    s : jax array of shape (*dims)
+        Noise scales.
+    s_0 : scalar or jax array, broadcastable to `s`
+        Prior on noise scale.
+    nu_s : int
+        Chi-squared degrees of freedom in noise prior.
+    **kwargs : dict
+        Overflow, for convenience.
 
     Returns
     -------
-    log_probability: jax array, shape (*dims)
+    log_ps: jax array of shape (*dims)
+        Log probability of `s`.
     """
     return -nu_s * s_0 / s / 2 - (1 + nu_s / 2) * jnp.log(s)
 
 
 def obs_log_prob(Y, x, s, Cd, sigmasq, **kwargs):
     """
-    Calculate the log probability of keypoint coordinates at each
-    time-step, given continuous latent trajectories, centroids, heading
-    angles, noise scales, and observation parameters
+    Calculate the log probability of the observations at each
+    time-step given the latent trajectories, noise parameters, and
+    observation matrix.
 
     Parameters
-    ----------  
-    Y: jax array, shape (*dims,k,d), Keypoint coordinates
-    x: jax array, shape (*dims,D), Latent trajectories
-    s: jax array, shape (*dims,k), Noise scales
-    Cd: jax array, shape ((k-1)*d, D-1), Observation transformation
-    sigmasq: jax array, shape (k,), Unscaled noise for each keypoint
+    ----------
+    Y : jax array of shape (*dims, obs_dim)
+        Observations.
+    x : jax array of shape (*dims, latent_dim)
+        Latent trajectories.
+    s : jax array of shape (*dims, obs_dim)
+        Noise scales.
+    Cd : jax array of shape (obs_dim, latent_dim + 1)
+        Observation transform.
+    sigmasq : jax_array of shape obs_dim
+        Unscaled noise.
+    **kwargs : dict
+        Overflow, for convenience.
 
     Returns
     -------
-    log_probability: jax array, shape (*dims,k)
+    log_pY: jax array of shape (*dims, obs_dim)
+        Log probability of `Y`.
     """
     Y_bar = apply_affine(x, Cd)
-    cov = s * sigmasq
+    cov = jnp.sqrt(s * sigmasq)
     return tfd.MultivariateNormalDiag(Y_bar, cov).log_prob(Y)
 
 
 @jax.jit
 def log_joint_likelihood(Y, mask, x, s, z, pi, Ab, Q, Cd, sigmasq, s_0, nu_s, **kwargs):
     """
-    Calculate the total log probability for each latent state
+    Calculate the total log probability for each latent state.
 
     Parameters
-    ----------  
-    Y: jax array, shape (*dims,k,d), Keypoint coordinates
-    mask: jax array, shape (*dims), Binary indicator for valid frames
-    x: jax array, shape (*dims,D), Latent trajectories
-    s: jax array, shape (*dims,k), Noise scales
-    z: jax array, shape (*dims), Discrete state sequences
-    pi: jax array, shape (N,N), Transition probabilities
-    Ab: jax array, shape (N,D*L+1), Autoregressive transforms
-    Q: jax array, shape (D,D), Autoregressive noise covariances
-    Cd: jax array, shape ((k-1)*d, D-1), Observation transformation
-    sigmasq: jax array, shape (k,), Unscaled noise for each keypoint
-    s_0: float or jax array, shape (*dims,k), Prior on noise scale
-    nu_s: int, Degrees of freedom in noise prior
+    ----------
+    Y : jax array of shape (*dims, T, obs_dim)
+        Observations.
+    mask : jax array of shape (*dims, T)
+        Binary indicator for valid frames.
+    x : jax array of shape (*dims, T, latent_dim)
+        Latent trajectories.
+    s : jax array of shape (*dims, T, obs_dim)
+        Noise scales.
+    z : jax_array of shape (*dims, T - n_lags)
+        Discrete state sequences.
+    pi : jax_array of shape (num_states, num_states)
+        Transition probabilities.
+    Ab : jax array of shape (num_states, latent_dim, ar_dim)
+        Autoregressive transforms.
+    Q : jax array of shape (num_states, latent_dim, latent_dim)
+        Autoregressive noise covariances.
+    Cd : jax array of shape (obs_dim, latent_dim + 1)
+        Observation transform.
+    sigmasq : jax_array of shape obs_dim
+        Unscaled noise.
+    s_0 : scalar or jax array broadcastable to `Y`
+        Prior on noise scale.
+    nu_s : int
+        Chi-squared degrees of freedom in noise prior.
+    **kwargs : dict
+        Overflow, for convenience.
 
     Returns
     -------
     ll: dict
         Dictionary mapping the name of each state variable to
-        its total log probability
-
+        its total log probability.
     """
     ll = arhmm.log_joint_likelihood(x, mask, z, pi, Ab, Q)
 
@@ -95,7 +117,26 @@ def log_joint_likelihood(Y, mask, x, s, z, pi, Ab, Q, Cd, sigmasq, s_0, nu_s, **
 
 def model_likelihood(data, states, params, hypparams, **kwargs):
     """
-    Convenience class that invokes `log_joint_likelihood`
+    Convenience class that invokes `log_joint_likelihood`.
+    
+    Parameters
+    ----------
+    data : dict
+        Data dictionary containing the observations and mask.
+    states : dict
+        State values for each latent variable.
+    params : dict
+        Values for each model parameter.
+    hypparams : dict
+        Values for each group of hyperparameters.
+    **kwargs : dict
+        Overflow, for convenience.
+
+    Returns
+    ------
+    ll : dict
+        Dictionary mapping state variable name to its
+        total log probability.
     """
     return log_joint_likelihood(**data, **states, **params,
                                 **hypparams['obs_hypparams'])

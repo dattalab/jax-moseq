@@ -6,50 +6,48 @@ from jax_moseq.utils.autoregression import get_nlags, ar_log_likelihood
 
 def discrete_stateseq_log_prob(z, pi, **kwargs):
     """
-    Calculate the log probability of a discrete state sequence at each
-    time-step given a matrix of transition probabilities
+    Calculate the log probability of a discrete state sequence
+    at each timestep given a matrix of transition probabilities.
 
     Parameters
-    ----------  
-    z: jax array, shape (*dims,t)
-        Discrete state sequences of length t
-
-    pi: jax array, shape (N,N)
-        Transition probabilities
+    ----------
+    z : jax_array of shape (*dims, T - n_lags)
+        Discrete state sequences.
+    pi : jax_array of shape (num_states, num_states)
+        Transition probabilities.
+    **kwargs : dict
+        Overflow, for convenience.
 
     Returns
     -------
-    log_probability: jax array, shape (*dims,t-1)
-
+    log_pz : jax array of shape (*dims, T - 1)
+        Log probability of `z`.
     """
     return jnp.log(pi[z[...,:-1],z[...,1:]])
 
 
 def continuous_stateseq_log_prob(x, z, Ab, Q, **kwargs):
     """
-    Calculate the log probability of the trajectory ``x`` at each time 
+    Calculate the log probability of the trajectory `x` at each time 
     step, given switching autoregressive (AR) parameters
 
     Parameters
     ----------  
-    x: jax array, shape (*dims,t,D)
-        Continuous latent trajectories in R^D of length t
-
-    z: jax array, shape (*dims,t)
-        Discrete state sequences of length t
-
-    Ab: jax array, shape (N,D*L+1) 
-        AR transforms (including affine term) for each of N discrete
-        states, where D is the dimension of the latent states and 
-        L is the the order of the AR process
-
-    Q: jax array, shape (N,D,D) 
-        AR noise covariance for each of N discrete states
+    x : jax array of shape (*dims, T, latent_dim)
+        Latent trajectories.
+    z : jax_array of shape (*dims, T - n_lags)
+        Discrete state sequences.
+    Ab : jax array of shape (num_states, latent_dim, ar_dim)
+        Autoregressive transforms.
+    Q : jax array of shape (num_states, latent_dim, latent_dim)
+        Autoregressive noise covariances.
+    **kwargs : dict
+        Overflow, for convenience.
 
     Returns
     -------
-    log_probability: jax array, shape (*dims,t-L)
-
+    log_px : jax array of shape (*dims, T - n_lags)
+        Log probability of `x`.
     """
     return ar_log_likelihood(x, (Ab[z], Q[z]))
 
@@ -60,19 +58,27 @@ def log_joint_likelihood(x, mask, z, pi, Ab, Q, **kwargs):
     Calculate the total log probability for each latent state
 
     Parameters
-    ----------  
-    x: jax array, shape (*dims,D), Continuous trajectories
-    mask: jax array, shape (*dims), Binary indicator for valid frames
-    z: jax array, shape (*dims), Discrete state sequences
-    pi: jax array, shape (N,N), Transition probabilities
-    Ab: jax array, shape (N,D*L+1), Autoregressive transforms
-    Q: jax array, shape (D,D), Autoregressive noise covariances
+    ----------
+    x : jax array of shape (*dims, T, latent_dim)
+        Latent trajectories.
+    mask : jax array of shape (*dims)
+        Binary indicator for which data points are valid.
+    z : jax_array of shape (*dims, T - n_lags)
+        Discrete state sequences.
+    pi : jax_array of shape (num_states, num_states)
+        Transition probabilities.
+    Ab : jax array of shape (num_states, latent_dim, ar_dim)
+        Autoregressive transforms.
+    Q : jax array of shape (num_states, latent_dim, latent_dim)
+        Autoregressive noise covariances.
+    **kwargs : dict
+        Overflow, for convenience.
 
     Returns
     -------
-    log_probabilities: dict
-        Dictionary mapping the name of each latent state variables to
-        its total log probability
+    ll : dict
+        Dictionary mapping state variable name to its
+        total log probability.
     """
     ll = {}
     
@@ -88,6 +94,25 @@ def log_joint_likelihood(x, mask, z, pi, Ab, Q, **kwargs):
 def model_likelihood(data, states, params,
                      hypparams=None, **kwargs):
     """
-    Convenience class that invokes `log_joint_likelihood`
+    Convenience class that invokes `log_joint_likelihood`.
+    
+    Parameters
+    ----------
+    data : dict
+        Data dictionary containing the observations and mask.
+    states : dict
+        State values for each latent variable.
+    params : dict
+        Values for each model parameter.
+    hypparams : dict, optional
+        Values for each group of hyperparameters.
+    **kwargs : dict
+        Overflow, for convenience.
+
+    Returns
+    ------
+    ll : dict
+        Dictionary mapping state variable name to its
+        total log probability.
     """
     return log_joint_likelihood(**data, **states, **params)

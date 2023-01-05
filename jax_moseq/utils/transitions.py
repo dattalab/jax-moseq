@@ -1,14 +1,11 @@
-from numba import njit, prange
 import numpy as np
-import jax, jax.numpy as jnp, jax.random as jr
+import jax
+import jax.numpy as jnp
+import jax.random as jr
+from numba import njit, prange
 
-def jax_io(fn): 
-    """
-    Converts a function involving numpy arrays to one that inputs and
-    outputs jax arrays.
-    """
-    return lambda *args, **kwargs: jax.device_put(
-        fn(*jax.device_get(args), **jax.device_get(kwargs)))
+from jax_moseq.utils import jax_io
+
 
 @njit
 def count_transitions(num_states, stateseqs, mask):
@@ -61,6 +58,7 @@ def sample_crp_tablecounts(concentration,customers,colweights):
                     < (concentration * colweights[j]) / (k+concentration*colweights[j])
     return m
 
+
 def sample_ms(counts, betas, alpha, kappa):
     ms = sample_crp_tablecounts(alpha, np.array(counts,dtype=int), np.array(betas))
     newms = ms.copy()
@@ -73,12 +71,14 @@ def sample_ms(counts, betas, alpha, kappa):
                 dtype=np.int32)
     return jnp.array(newms)
 
+
 def sample_hdp_transitions(seed, counts, betas, alpha, kappa, gamma):
     seeds,N = jr.split(seed,3),counts.shape[0]
     ms = sample_ms(counts, betas, alpha, kappa)
     betas = jr.dirichlet(seeds[1], ms.sum(0)+gamma/N)
     conc = alpha*betas[None,:] + counts + kappa*jnp.identity(N)
     return betas, jr.dirichlet(seeds[2], conc)
+
 
 def sample_transitions(seed, counts, alpha, kappa):
     conc = counts + alpha + kappa*jnp.identity(counts.shape[0])
@@ -90,10 +90,12 @@ def resample_hdp_transitions(seed, *, z, mask, betas, alpha, kappa, gamma, num_s
     betas, pi = sample_hdp_transitions(seed, counts, betas, alpha, kappa, gamma)
     return betas, pi
 
+
 def resample_transitions(seed, *, z, mask, alpha, kappa, num_states, **kwargs):
     counts = jax_io(count_transitions)(num_states, z, mask)
     pi = sample_transitions(seed, counts, alpha, kappa)
     return pi
+
 
 def init_hdp_transitions(seed, *, num_states, alpha, kappa, gamma):
     seeds = jr.split(seed)
@@ -101,4 +103,3 @@ def init_hdp_transitions(seed, *, num_states, alpha, kappa, gamma):
     betas_init = jr.dirichlet(seeds[0], jnp.ones(num_states)*gamma/num_states)   
     betas, pi = sample_hdp_transitions(seeds[1], counts, betas_init, alpha, kappa, gamma)
     return betas, pi
-
