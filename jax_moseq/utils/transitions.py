@@ -1,105 +1,365 @@
 import numpy as np
+from numba import njit, prange
+
 import jax
 import jax.numpy as jnp
 import jax.random as jr
-from numba import njit, prange
 
-from jax_moseq.utils import jax_io
+from functools import partial
 
 
-@njit
+@partial(jax.jit, static_argnames=('num_states'))
 def count_transitions(num_states, stateseqs, mask):
     """
-    Count all transitions in `stateseqs` where the start and end
-    states both have `mask>0`. The last dim of `stateseqs` indexes time. 
+    Count the number of transitions between each pair of
+    states `i` and `j` in the unmasked entries of `stateseqs`,
+    including self transitions (i.e. i == j).
 
     Parameters
     ----------
     num_states: int
-        Total number of states: must be at least ``max(stateseqs)+1``
+        Total number of states (must exceed `max(stateseqs)`).
 
-    stateseqs: ndarray
-        Batch of state sequences where the last dim indexes time 
+    stateseqs: jax int array of shape (*dims, T)
+        Batch of state sequences where the last dim indexes time.
+        All entries 
 
-    mask: ndarray
-        Binary indicator for which elements of ``stateseqs`` are valid,
-        e.g. when state sequences of different lengths have been padded
+    mask: jax array of shape (*dims, T + num_lags)
+        Binary indicator for which elements of ``stateseqs`` are valid.
+        If `num_lags > 0`, the first `num_lags` time points of the mask
+        are ignored (ensures time alignment with the AR process).
 
     Returns
     -------
-    counts: ndarray, shape (num_states,num_states)
-        The number of transitions between every pair of states
-
+    transition_counts: jax array of shape (num_states, num_states)
+        The number of transitions between every pair of states.
     """    
-    counts = np.zeros((num_states,num_states))
-    for i in prange(mask.shape[0]):
-        for j in prange(mask.shape[1]-1):
-            if not (   
-               mask[i,j]==0 or mask[i,j+1]==0 
-               or np.isnan(stateseqs[i,j]) 
-               or np.isnan(stateseqs[i,j+1])
-            ): counts[stateseqs[i,j],stateseqs[i,j+1]] += 1
-    return counts
+    T = stateseqs.shape[-1]
+    
+    mask = mask[..., -T + 1:]
+    start_states = stateseqs[..., :-1]
+    end_states = stateseqs[..., 1:]
+    
+    transition_counts = jnp.zeros((num_states, num_states))
+    transition_counts = transition_counts.at[start_states, end_states].add(mask)
+    return transition_counts
 
 
 @njit
-def sample_crp_tablecounts(concentration,customers,colweights):
-    m = np.zeros_like(customers)
-    tot = np.sum(customers)
-    randseq = np.random.random(tot)
-    tmp = np.empty_like(customers).flatten()
-    tmp[0] = 0
-    tmp[1:] = np.cumsum(np.ravel(customers)[:customers.size-1])
-    starts = tmp.reshape(customers.shape)
-    for i in prange(customers.shape[0]):
-        for j in range(customers.shape[1]):
-            for k in range(customers[i,j]):
-                m[i,j] += randseq[starts[i,j]+k] \
-                    < (concentration * colweights[j]) / (k+concentration*colweights[j])
-    return m
-
-
-def sample_ms(counts, betas, alpha, kappa):
-    ms = sample_crp_tablecounts(alpha, np.array(counts,dtype=int), np.array(betas))
-    newms = ms.copy()
-    if ms.sum() > 0:
-        # np.random.binomial fails when n=0, so pull out nonzero indices
-        indices = np.nonzero(newms.flat[::ms.shape[0]+1])
-        newms.flat[::ms.shape[0]+1][indices] = np.array(np.random.binomial(
-                ms.flat[::ms.shape[0]+1][indices],
-                betas[indices]*alpha/(betas[indices]*alpha + kappa)),
-                dtype=np.int32)
-    return jnp.array(newms)
-
-
-def sample_hdp_transitions(seed, counts, betas, alpha, kappa, gamma):
-    seeds,N = jr.split(seed,3),counts.shape[0]
-    ms = sample_ms(counts, betas, alpha, kappa)
-    betas = jr.dirichlet(seeds[1], ms.sum(0)+gamma/N)
-    conc = alpha*betas[None,:] + counts + kappa*jnp.identity(N)
-    return betas, jr.dirichlet(seeds[2], conc)
-
-
-def sample_transitions(seed, counts, alpha, kappa):
-    conc = counts + alpha + kappa*jnp.identity(counts.shape[0])
-    return jr.dirichlet(seed, conc)
+def _sample_crf_table_counts(seed, customer_counts, dish_ratings):
+    """
+    Samples table counts for a Chinese restaurant franchise (CRF) process
+    with no loyalty factor. For a more comprehensive overview, see
+    `_sample_loyal_crf_table_counts`, for which this is a helper function.
     
+    Params
+    ------
+    seed : int
+        Value for random seed.
+    customer_counts : numpy array of shape (N, N)
+        Number of customers for each restaurant/dish pair.
+    concentrations : numpy array of shape N
+        Parameter representing franchise-wide popularity of each dish.
+        
+    Returns
+    -------
+    table_counts : numpy array of shape (N, N)
+        Number of tables in each restaurant that considered each dish.
 
-def resample_hdp_transitions(seed, *, z, mask, betas, alpha, kappa, gamma, num_states, **kwargs):
-    counts = jax_io(count_transitions)(num_states, z, mask)
-    betas, pi = sample_hdp_transitions(seed, counts, betas, alpha, kappa, gamma)
-    return betas, pi
+    Notes
+    -----
+    This is implemented in numpy/numba because jax dislikes operations
+    with hetereogenous numbers of loop iterations.
+    """
+    np.random.seed(seed)
+    N = len(dish_ratings)    # num restaurants/dishes
+
+    # Sample counts without considering loyalty factor
+    table_counts = np.zeros_like(customer_counts)
+    for i in prange(N):
+        for j in range(N):
+            # Sample counts by simulating table dish
+            # assignment process.
+            for k in range(customer_counts[i, j]):
+                dish_rating = dish_ratings[j]
+                p = dish_ratings[j] / (k + dish_ratings[j])
+                bernoulli_sample = np.random.random() < p
+                table_counts[i, j] += bernoulli_sample
+    return table_counts
 
 
-def resample_transitions(seed, *, z, mask, alpha, kappa, num_states, **kwargs):
-    counts = jax_io(count_transitions)(num_states, z, mask)
-    pi = sample_transitions(seed, counts, alpha, kappa)
+def _sample_loyal_crf_table_counts(seed, customer_counts, dish_ratings, loyalty):
+    """
+    In a Chinese restaurant franchise (CRF) process with loyal customers,
+    `table_counts[i, j]` represents the number of tables in restaurant `i`
+    that considered dish `j`, which is a random variable that depends on:
+
+        (1) the observed number of patrons in the restaurant eating
+            the dish (`customer_counts[i, j]`),
+        (2) the franchise-wide popularity of the dish
+            (`dish_ratings[j]`), and
+        (3) the bias towards each restaurant's specialty dish
+            (i.e. the dish that shares its index `i`), which is
+            encoded by `loyalty`.
+
+    This function samples that value for each restaurant/dish pair. In
+    brief, each restaurant is a row of the transition matrix, each instance
+    of a customer in restaurant `i` eating dish `j` represents a transition
+    from `i` to `j`, and the number of tables that considered dish `j`
+    throughout the franchise is the sufficent statistic for the resampling of
+    the franchise-wide `dish_ratings` (analogous to `betas` scaled by `alpha`).
+    For a more thorough overview of the analogy and its relevance to the HDP-HMM
+    Gibbs sampling algorithm, see the reference (note the distinction between
+    considering and choosing a dish).
+
+    Params
+    ------
+    seed : int
+        Value for random seed.
+    customer_counts : numpy array of shape (N, N)
+        Number of customers for each restaurant/dish pair.
+    dish_ratings : numpy array of shape N
+        Parameter representing franchise-wide popularity of each dish.
+    loyalty : scalar
+        Non-negative scalar representing customers' bias for their
+        restaurant's specialty dish.
+        
+    Returns
+    -------
+    table_counts : numpy array of shape (N, N)
+        Number of tables in each restaurant that considered each dish.
+
+    References
+    ----------
+    See the supplement to Fox et al. 2011 at
+    <http://dx.doi.org/10.1214/10-AOAS395SUPP>.
+    """
+    # Obtain uncorrected table counts
+    table_counts = _sample_crf_table_counts(seed, customer_counts,
+                                            dish_ratings)
+    
+    # Downsample the influence of self-transitions, which are presumed
+    # to result from restauraunt loyalty and are therefore less
+    # informative about franchise-wide popularity ratings
+    diagonal_counts = np.diag(table_counts)
+    p = dish_ratings / (dish_ratings + loyalty)
+    binomial_samples = np.random.binomial(diagonal_counts, p)
+    np.fill_diagonal(table_counts, binomial_samples)
+    return table_counts
+
+
+def _sample_beta_suffient_stats(seed, transition_counts,
+                                betas, alpha, kappa, gamma):
+    """
+    Compute the sufficient statistics for the Gibbs resampling
+    of `betas` using the auxillary parameter scheme devised
+    by Fox et al. for the Sticky HDP-HMM.
+
+    Params
+    ------
+    seed : jr.PRNGKey
+        JAX random seed.
+    transition_counts : jax array of shape (num_states, num_states)
+        The number of transitions between every pair of states.
+    betas : jax array of shape num_states
+        State usages.
+    alpha : scalar
+        State usage influence hyperparameter. 
+    kappa : scalar
+        State persistence (i.e. "stickiness") hyperparameter.
+    gamma : scalar
+        Usage uniformity hyperparameter.
+
+    Returns
+    -------
+    sufficient_stats : jax array of shape num_states
+        Sufficient statistics for resampling `betas`.
+    """
+    num_states = len(betas)
+    
+    # Sample auxillary parameters (uses numpy/numba),
+    # denoted `m` or `m_bar` depending on the formulation.
+    seed = seed[0].item()
+    concentrations = np.array(alpha * betas)
+    transition_counts = np.array(transition_counts, dtype=np.int32)
+    # also known as `m` or `m_bar`, depending the formulation
+    auxillary_param = _sample_loyal_crf_table_counts(seed, transition_counts,
+                                                     concentrations, kappa)
+
+    # Compute sufficient statistics
+    sufficient_stats = auxillary_param.sum(0) + (gamma / num_states)
+    sufficient_stats = jax.device_put(sufficient_stats)
+    return sufficient_stats
+
+
+def sample_betas(seed, transition_counts,
+                 betas, alpha, kappa, gamma):
+    """
+    Sample the state usages `betas` given the observed transition
+    counts and the model hyperparameters.
+
+    Params
+    ------
+    seed : jr.PRNGKey
+        JAX random seed.
+    transition_counts : jax array of shape (num_states, num_states)
+        The number of transitions between every pair of states.
+    betas : jax array of shape num_states
+        State usages.
+    alpha : scalar
+        State usage influence hyperparameter. 
+    kappa : scalar
+        State persistence (i.e. "stickiness") hyperparameter.
+    gamma : scalar
+        Usage uniformity hyperparameter.
+
+    Returns
+    -------
+    betas : jax array of shape num_states
+        Resampled state usages.
+    """
+    sufficient_stats = _sample_beta_suffient_stats(
+                seed, transition_counts, betas, alpha, kappa, gamma)
+    betas = jr.dirichlet(seed, sufficient_stats)
+    return betas
+
+
+def sample_pi(seed, transition_counts, betas, alpha, kappa):
+    """
+    Sample the transition matrix `pi` given the observed transition
+    counts, state usages, and model hyperparameters.
+
+    Params
+    ------
+    seed : jr.PRNGKey
+        JAX random seed.
+    transition_counts : jax array of shape (num_states, num_states)
+        The number of transitions between every pair of states.
+    betas : jax array of shape num_states
+        State usages.
+    alpha : scalar
+        State usage influence hyperparameter. 
+    kappa : scalar
+        State persistence (i.e. "stickiness") hyperparameter.
+
+    Returns
+    -------
+    pi : jax_array of shape (num_states, num_states)
+        Resampled transition probabilities.
+    """
+    num_states = len(betas)
+    sufficient_stats = transition_counts + \
+            alpha * betas + kappa * jnp.eye(num_states)
+    pi = jr.dirichlet(seed, sufficient_stats)
     return pi
 
 
-def init_hdp_transitions(seed, *, num_states, alpha, kappa, gamma):
+def sample_hdp_transitions(seed, transition_counts,
+                           betas, alpha, kappa, gamma):
+    """
+    Sample the transition parameters of the HDP-HMM given
+    the observed transition counts, the current usage estimates,
+    and the model hyperparameters.
+
+    Params
+    ------
+    seed : jr.PRNGKey
+        JAX random seed.
+    transition_counts : jax array of shape (num_states, num_states)
+        The number of transitions between every pair of states.
+    betas : jax array of shape num_states
+        State usages.
+    alpha : scalar
+        State usage influence hyperparameter. 
+    kappa : scalar
+        State persistence (i.e. "stickiness") hyperparameter.
+    gamma : scalar
+        Usage uniformity hyperparameter.
+
+    Returns
+    -------
+    betas : jax array of shape num_states
+        Resampled state usages.
+    pi : jax_array of shape (num_states, num_states)
+        Resampled transition probabilities.
+    """
     seeds = jr.split(seed)
-    counts = jnp.zeros((num_states,num_states))
-    betas_init = jr.dirichlet(seeds[0], jnp.ones(num_states)*gamma/num_states)   
-    betas, pi = sample_hdp_transitions(seeds[1], counts, betas_init, alpha, kappa, gamma)
+    betas = sample_betas(seeds[0], transition_counts,
+                         betas, alpha, kappa, gamma)
+    pi = sample_pi(seeds[1], transition_counts,
+                   betas, alpha, kappa)
+    return betas, pi
+
+
+def resample_hdp_transitions(seed, z, mask, betas,
+                             alpha, kappa, gamma, **kwargs):
+    """
+    Resample the transition parameters of the HDP-HMM.
+
+    Params
+    ------
+    seed : jr.PRNGKey
+        JAX random seed.
+    z : jax_array of shape (*dims, T - n_lags)
+        Discrete state sequences.
+    mask : jax array of shape (*dims, T)
+        Binary indicator for which data points are valid.
+    betas : jax array of shape num_states
+        State usages.
+    alpha : scalar
+        State usage influence hyperparameter. 
+    kappa : scalar
+        State persistence (i.e. "stickiness") hyperparameter.
+    gamma : scalar
+        Usage uniformity hyperparameter.
+    **kwargs : dict
+        Overflow, for convenience.
+
+    Returns
+    -------
+    betas : jax array of shape num_states
+        Resampled state usages.
+    pi : jax_array of shape (num_states, num_states)
+        Resampled transition probabilities.
+    """
+    num_states = len(betas)
+    transition_counts = count_transitions(num_states, z, mask)
+    betas, pi = sample_hdp_transitions(seed, transition_counts,
+                                       betas, alpha, kappa, gamma)
+    return betas, pi
+
+
+def init_hdp_transitions(seed, num_states, alpha, kappa, gamma, **kwargs):
+    """
+    Initialize the transition parameters of the HDP-HMM.
+
+    Params
+    ------
+    seed : jr.PRNGKey
+        JAX random seed.
+    num_states : int
+        Max number of HMM states.
+    betas : jax array of shape num_states
+        State usages.
+    alpha : scalar
+        State usage influence hyperparameter. 
+    kappa : scalar
+        State persistence (i.e. "stickiness") hyperparameter.
+    gamma : scalar
+        Usage uniformity hyperparameter.
+    **kwargs : dict
+        Overflow, for convenience.
+
+    Returns
+    -------
+    betas : jax array of shape num_states
+        Initial state usages.
+    pi : jax_array of shape (num_states, num_states)
+        Initial transition probabilities.
+    """
+    seeds = jr.split(seed)
+    betas_init = jr.dirichlet(seeds[0], jnp.full(num_states, gamma / num_states))
+    pseudo_counts = jnp.zeros((num_states, num_states))
+    betas, pi = sample_hdp_transitions(seeds[1], pseudo_counts, betas_init,
+                                       alpha, kappa, gamma)
     return betas, pi
