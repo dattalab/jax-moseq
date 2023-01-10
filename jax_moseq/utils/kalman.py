@@ -96,19 +96,19 @@ def ar_to_lds(Ab, Q, Cd=None):
     
     Parameters
     ----------  
-    Ab: jax array, shape (*dims, D, D*L + 1)
+    Ab: jax array, shape (dims, D, D*L + 1)
         AR affine transform
-    Q: jax array, shape (*dims, D, D)
+    Q: jax array, shape (dims, D, D)
         AR noise covariance
-    Cs: jax array, shape (*dims, D_obs, D)
+    Cs: jax array, shape (dims, D_obs, D)
         obs transformation
     
     Returns
     -------
-    As_: jax array, shape (*dims, D*L, D*L)
-    bs_: jax array, shape (*dims, D*L)    
-    Qs_: jax array, shape (*dims, D*L, D*L)  
-    Cs_: jax array, shape (*dims, D_obs, D*L)
+    As_: jax array, shape (dims, D*L, D*L)
+    bs_: jax array, shape (dims, D*L)    
+    Qs_: jax array, shape (dims, D*L, D*L)  
+    Cs_: jax array, shape (dims, D_obs, D*L)
     """    
     nlags = get_nlags(Ab)
     latent_dim = Ab.shape[-2]
@@ -117,16 +117,16 @@ def ar_to_lds(Ab, Q, Cd=None):
 
     A = Ab[..., :-1]
     dims = A.shape[:-2]
-    A_ = jnp.zeros((*dims, lds_dim, lds_dim))
+    A_ = jnp.zeros((dims, lds_dim, lds_dim))
     A_ = A_.at[..., :-latent_dim, latent_dim:].set(eye)
     A_ = A_.at[..., -latent_dim:, :].set(A)
 
     b = Ab[..., -1]
-    b_ = jnp.zeros((*dims, lds_dim))
+    b_ = jnp.zeros((dims, lds_dim))
     b_ = b_.at[..., -latent_dim:].set(b)
     
     dims = Q.shape[:-2]
-    Q_ = jnp.zeros((*dims, lds_dim, lds_dim))
+    Q_ = jnp.zeros((dims, lds_dim, lds_dim))
     Q_ = Q_.at[..., :-latent_dim, :-latent_dim].set(eye * 1e-2)
     Q_ = Q_.at[..., -latent_dim:, -latent_dim:].set(Q)
     

@@ -22,7 +22,7 @@ na = jnp.newaxis
 @jax.jit
 def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, **kwargs):
     """
-    Resamples the discrete state sequence `z`.
+    Resamples the discrete state sequence ``z``.
 
     Parameters
     ----------
@@ -59,7 +59,7 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, **kwargs):
 def resample_ar_params(seed, *, nlags, num_states, mask, x, z,
                        nu_0, S_0, M_0, K_0, **kwargs):
     """
-    Resamples the AR parameters `Ab` and `Q`.
+    Resamples the AR parameters ``Ab`` and ``Q``.
 
     Parameters
     ----------
@@ -116,11 +116,11 @@ def _resample_regression_params(seed, mask, x_in, x_out,
     ----------
     seed : jr.PRNGKey
         JAX random seed.
-    mask : jax array of shape (*dims)
+    mask : jax array of shape (dims)
         Binary indicator for valid frames.
-    x_in : jax array of shape (*dims, in_dim)
+    x_in : jax array of shape (dims, in_dim)
         Regression input.
-    x_out : jax array of shape (*dims, out_dim)
+    x_out : jax array of shape (dims, out_dim)
         Regression output.
     nu_0 : int
         Inverse-Wishart degrees of freedom parameter for Q.

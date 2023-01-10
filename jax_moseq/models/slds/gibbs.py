@@ -249,18 +249,18 @@ def compute_squared_error(seed, Y, x, Cd, mask=None):
     ----------
     seed : jr.PRNGKey
         JAX random seed.
-    Y : jax array of shape (*dims, obs_dim)
+    Y : jax array of shape (dims, obs_dim)
         Observations.
-    x : jax array of shape (*dims, latent_dim)
+    x : jax array of shape (dims, latent_dim)
         Latent trajectories.
     Cd : jax array of shape (obs_dim, latent_dim + 1)
         Observation transform.
-    mask : jax array of shape (*dims), optional
+    mask : jax array of shape (dims), optional
         Binary indicator for valid frames.
 
     Returns
     ------
-    sqerr : jax array of shape (*dims, obs_dim)
+    sqerr : jax array of shape (dims, obs_dim)
         Squared error between model predicted and
         true observations.
     """

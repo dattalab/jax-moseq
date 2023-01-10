@@ -18,13 +18,13 @@ def to_vanilla_slds(Y, v, h, s, Cd, sigmasq, **kwargs):
     
     Parameters
     ----------
-    Y : jax array of shape (*dims, k, d)
+    Y : jax array of shape (dims, k, d)
         Keypoint observations.
-    v : jax array of shape (*dims, d)
+    v : jax array of shape (dims, d)
         Centroid positions.
-    h : jax array of shape (*dims, T)
+    h : jax array of shape (dims, T)
         Heading angles.
-    s : jax array of shape (*dims, k)
+    s : jax array of shape (dims, k)
         Noise scales.
     Cd : jax array of shape ((k - 1) * d, latent_dim + 1)
         Observation transform.
@@ -35,9 +35,9 @@ def to_vanilla_slds(Y, v, h, s, Cd, sigmasq, **kwargs):
         
     Returns
     -------
-    Y : jax array of shape (*dims, k * d)
+    Y : jax array of shape (dims, k * d)
         Flattened and aligned keypoint observations.
-    s : jax array of shape (*dims, k * d)
+    s : jax array of shape (dims, k * d)
         Noise scales repeated along spatial dimension.
     Cd : jax array of shape (k * d, latent_dim + 1)
         Emission parameters, accounting for effect of embedding.
@@ -67,15 +67,15 @@ def estimate_coordinates(x, v, h, Cd, **kwargs):
     """
     Estimate keypoint coordinates obtained from projecting the 
     latent state ``x`` into keypoint-space (via ``Cd``) and then
-    rotating and translating by ``h`` and `v`` respectively
+    rotating and translating by ``h`` and ``v`` respectively
 
     Parameters
     ----------
-    x : jax array of shape (*dims, latent_dim)
+    x : jax array of shape (dims, latent_dim)
         Latent trajectories.
-    v : jax array of shape (*dims, d)
+    v : jax array of shape (dims, d)
         Centroid positions.
-    h : jax array of shape (*dims)
+    h : jax array of shape (dims)
         Heading angles.
     Cd : jax array of shape ((k - 1) * d, latent_dim + 1)
         Observation transform.
@@ -84,7 +84,7 @@ def estimate_coordinates(x, v, h, Cd, **kwargs):
 
     Returns
     -------
-    Y_bar : jax array of shape (*dims, k, d), Estimated coordinates
+    Y_bar : jax array of shape (dims, k, d), Estimated coordinates
     """
     batch_shape = x.shape[:-2]
     d = v.shape[-1]
@@ -102,7 +102,7 @@ def estimate_aligned(x, Cd, k):
 
     Parameters
     ----------
-    x : jax array of shape (*dims, latent_dim)
+    x : jax array of shape (dims, latent_dim)
         Latent trajectories.
     Cd : jax array of shape ((k - 1) * d, latent_dim + 1)
         Observation transform.
@@ -111,7 +111,7 @@ def estimate_aligned(x, Cd, k):
 
     Returns
     ------
-    Y_aligned : jax array of shape (*dims, k * d)
+    Y_aligned : jax array of shape (dims, k * d)
         Aligned keypoint positions estimated from latents.
     """
     # Apply emissions to obtain flattened,
@@ -135,16 +135,16 @@ def rigid_transform(Y, v, h):
     
     Parameters
     ----------
-    Y : jax array of shape (*dims, k, d)
+    Y : jax array of shape (dims, k, d)
         Keypoint observations.
-    v : jax array of shape (*dims, d)
+    v : jax array of shape (dims, d)
         Centroid positions.
-    h : jax array of shape (*dims)
+    h : jax array of shape (dims)
         Heading angles.
           
     Returns
     -------
-    Y_transformed: jax array of shape (*dims, k, d)
+    Y_transformed: jax array of shape (dims, k, d)
         Rigidly transformed positions.
     """
     return apply_rotation(Y, h) + v[..., na, :]
@@ -159,16 +159,16 @@ def inverse_rigid_transform(Y, v, h):
     
     Parameters
     ----------
-    Y : jax array of shape (*dims, k, d)
+    Y : jax array of shape (dims, k, d)
         Keypoint observations.
-    v : jax array of shape (*dims, d)
+    v : jax array of shape (dims, d)
         Centroid positions.
-    h : jax array of shape (*dims)
+    h : jax array of shape (dims)
         Heading angles.
           
     Returns
     -------
-    Y_transformed: jax array of shape (*dims, k, d)
+    Y_transformed: jax array of shape (dims, k, d)
         Rigidly transformed positions.
     """
     return apply_rotation(Y - v[..., na, :], -h)
@@ -195,18 +195,18 @@ def center_embedding(k):
 
 def apply_rotation(Y, h):
     """
-    Rotate `Y` by `h` radians.
+    Rotate ``Y`` by ``h`` radians.
 
     Parameters
     ----------
-    Y : jax array of shape (*dims, k, d)
+    Y : jax array of shape (dims, k, d)
         Keypoint observations.
-    h : jax array of shape (*dims)
+    h : jax array of shape (dims)
         Heading angles.
 
     Returns
     ------
-    Y_rot : jax array of shape (*dims, k, d)
+    Y_rot : jax array of shape (dims, k, d)
         Rotated keypoint observations.
     """
     d = Y.shape[-1]
@@ -217,7 +217,7 @@ def apply_rotation(Y, h):
 def angle_to_rotation_matrix(h, d=3):
     """
     Create rotation matrices from an array of angles. If
-    `d > 2` then rotation is performed in the first two dims.
+    ``d > 2`` then rotation is performed in the first two dims.
     
     Parameters
     ----------
@@ -228,7 +228,7 @@ def angle_to_rotation_matrix(h, d=3):
 
     Returns
     ------
-    m: jax array of shape (*dims, d, d)
+    m: jax array of shape (dims, d, d)
         Rotation matrices.
     """
     m = jnp.tile(jnp.eye(d), (*h.shape,1,1))
@@ -247,12 +247,12 @@ def vector_to_angle(V):
 
     Parameters
     ----------
-    V : jax array of shape (*dims, 2)
+    V : jax array of shape (dims, 2)
         Batch of 2D vectors.
 
     Returns
     ------
-    h : jax array of shape (*dims)
+    h : jax array of shape (dims)
         Rotation angles in radians.
     """
     return jnp.arctan2(V[...,1], V[...,0])
@@ -268,15 +268,15 @@ def fit_pca(Y, mask, anterior_idxs, posterior_idxs,
     
     Parameters
     ----------
-    Y : jax array of shape (*dims, k, d)
+    Y : jax array of shape (dims, k, d)
         Keypoint observations.
-    mask : jax array of shape (*dims)
+    mask : jax array of shape (dims)
         Binary indicator for valid frames.
     anterior_idxs : iterable of ints
         Anterior keypoint indices for heading initialization.
     posterior_idxs : iterable of ints
         Posterior keypoint indices for heading initialization.
-    conf : jax array of shape (*dims, k), optional
+    conf : jax array of shape (dims, k), optional
         Confidence for each keypoint observation. Must be >= 0.
     conf_threshold : float, default=0.5
         Confidence threshold for interpolation.
@@ -308,13 +308,13 @@ def preprocess_for_pca(Y, anterior_idxs, posterior_idxs,
     
     Parameters
     ----------
-    Y : jax array of shape (*dims, k, d)
+    Y : jax array of shape (dims, k, d)
         Keypoint observations.
     anterior_idxs : iterable of ints
         Anterior keypoint indices for heading initialization.
     posterior_idxs : iterable of ints
         Posterior keypoint indices for heading initialization.
-    conf : jax array of shape (*dims, k), optional
+    conf : jax array of shape (dims, k), optional
         Confidence for each keypoint observation. Must be >= 0.
     conf_threshold : float, default=.5
         Confidence threshold for interpolation.
@@ -325,7 +325,7 @@ def preprocess_for_pca(Y, anterior_idxs, posterior_idxs,
           
     Returns
     -------
-    Y_flat : jax array of shape (*dims, (k - 1) * d), optional
+    Y_flat : jax array of shape (dims, (k - 1) * d), optional
         Aligned and embedded keypoint observations.
     """
     if conf is not None:
@@ -342,7 +342,7 @@ def preprocess_for_pca(Y, anterior_idxs, posterior_idxs,
     k, d = Y.shape[-2:]
     Gamma_inv = center_embedding(k).T
     Y_embedded = Gamma_inv @ Y_aligned
-    Y_flat = Y_embedded.reshape(*dims, (k - 1) * d)
+    Y_flat = Y_embedded.reshape(dims, (k - 1) * d)
     return Y_flat, v, h
 
 
@@ -355,7 +355,7 @@ def align_egocentric(Y, anterior_idxs, posterior_idxs, **kwargs):
     
     Parameters
     ----------
-    Y : jax array of shape (*dims, k, d)
+    Y : jax array of shape (dims, k, d)
         Keypoint observations.
     anterior_idxs : iterable of ints
         Anterior keypoint indices for heading initialization.
@@ -366,11 +366,11 @@ def align_egocentric(Y, anterior_idxs, posterior_idxs, **kwargs):
         
     Returns
     -------
-    Y_aligned : jax array of shape (*dims, k, d)
+    Y_aligned : jax array of shape (dims, k, d)
         Aligned keypoint coordinates.
-    v : jax array of shape (*dims, d)
+    v : jax array of shape (dims, d)
         Centroid positions that were used for alignment.
-    h : jax array of shape (*dims)
+    h : jax array of shape (dims)
         Heading angles that were used for alignment.
     """
     posterior_loc = Y[..., posterior_idxs, :2].mean(-2) 
@@ -390,14 +390,14 @@ def interpolate(Y, outliers, axis=1):
     ----------
     Y : jax array of shape (N, T, k, d)
         Keypoint observations.
-    outliers : jax array of shape (*dims, T, k)
+    outliers : jax array of shape (dims, T, k)
         Binary indicator whose true entries are outlier points.
     axis : int, default=1
         Axis to interpolate along.
         
     Returns
     -------
-    Y_interp : jax array, shape (*dims, T, k, d)
+    Y_interp : jax array, shape (dims, T, k, d)
         Copy of ``Y`` where outliers have been replaced by
         linearly interpolated values.
     """   

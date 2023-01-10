@@ -15,14 +15,14 @@ def location_log_prob(v, sigmasq_loc):
     
     Parameters
     ----------
-    v : jax array of shape (*dims, T, d)
+    v : jax array of shape (dims, T, d)
         Centroid positions.
     sigmasq_loc : float
         Assumed variance in centroid displacements.
    
     Returns
     -------
-    log_pv: jax array of shape (*dims, T - 1)
+    log_pv: jax array of shape (dims, T - 1)
         Log probability of `v`.
     """
     v0 = v[..., :-1, :]
@@ -39,15 +39,15 @@ def obs_log_prob(Y, x, v, h, s, Cd, sigmasq, **kwargs):
     
     Parameters
     ----------
-    Y : jax array of shape (*dims, k, d)
+    Y : jax array of shape (dims, k, d)
         Keypoint observations.
-    x : jax array of shape (*dims, latent_dim)
+    x : jax array of shape (dims, latent_dim)
         Latent trajectories.
-    v : jax array of shape (*dims, d)
+    v : jax array of shape (dims, d)
         Centroid positions.
-    h : jax array of shape (*dims)
+    h : jax array of shape (dims)
         Heading angles.
-    s : jax array of shape (*dims, k)
+    s : jax array of shape (dims, k)
         Noise scales.
     Cd : jax array of shape ((k - 1) * d, latent_dim + 1)
         Observation transform.
@@ -58,7 +58,7 @@ def obs_log_prob(Y, x, v, h, s, Cd, sigmasq, **kwargs):
     
     Returns
     -------
-    log_pY: jax array of shape (*dims, k)
+    log_pY: jax array of shape (dims, k)
         Log probability of `Y`.
     """
     Y_bar = estimate_coordinates(x, v, h, Cd)
@@ -74,19 +74,19 @@ def log_joint_likelihood(Y, mask, x, v, h, s, z, pi, Ab, Q, Cd,
 
     Parameters
     ----------
-    Y : jax array of shape (*dims, T, k, d)
+    Y : jax array of shape (dims, T, k, d)
         Keypoint observations.
-    mask : jax array of shape (*dims, T)
+    mask : jax array of shape (dims, T)
         Binary indicator for valid frames.
-    x : jax array of shape (*dims, T, latent_dim)
+    x : jax array of shape (dims, T, latent_dim)
         Latent trajectories.
-    v : jax array of shape (*dims, T, d)
+    v : jax array of shape (dims, T, d)
         Centroid positions.
-    h : jax array of shape (*dims, T)
+    h : jax array of shape (dims, T)
         Heading angles.
-    s : jax array of shape (*dims, T, k)
+    s : jax array of shape (dims, T, k)
         Noise scales.
-    z : jax_array of shape (*dims, T - n_lags)
+    z : jax_array of shape (dims, T - n_lags)
         Discrete state sequences.
     pi : jax_array of shape (num_states, num_states)
         Transition probabilities.

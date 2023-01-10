@@ -27,38 +27,39 @@ def ar_log_likelihood(x, params):
 def get_lags(x, nlags):
     """
     Get lags of a multivariate time series. Lags are concatenated along
-    the last dim in time-order. Writing the last two dims of ``x`` as
+    the last dim in time-order. So if the last rows of ``x`` look like
 
     .. math::
+
         \begin{bmatrix} 
-            x_0    \\
-            x_1    \\
-            \vdots \\
-            x_{t}  \\
+            x_{t-2}     \\
+            x_{t-1}     \\
+            x_{t} 
         \end{bmatrix}
 
-    the output of this function with ``nlags=3`` would be
+
+    then with ``nlags=3`` they would become
 
     .. math::
+
         \begin{bmatrix} 
-            x_0     & x_1     & x_2    \\
-            x_1     & x_2     & x_3    \\
-            \vdots  & \vdots  & \vdots \\
+            x_{t-5} & x_{t-4} & x_{t-3} \\
+            x_{t-4} & x_{t-3} & x_{t-2} \\
             x_{t-3} & x_{t-2} & x_{t-1}
-            \vdots
         \end{bmatrix}  
+
 
     Parameters
     ----------  
     nlags: int
         Number of lags
         
-    x: jax array, shape (*dims, t, d)
+    x: jax array, shape (dims, t, d)
         Batch of d-dimensional time series 
     
     Returns
     -------
-    x_lagged: jax array, shape (*dims, t-nlags, d*nlags)
+    x_lagged: jax array, shape (dims, t-nlags, d*nlags)
 
     """
     lags = [jnp.roll(x, t, axis=-2) for t in range(1, nlags + 1)]

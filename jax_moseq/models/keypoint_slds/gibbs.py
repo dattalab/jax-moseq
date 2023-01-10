@@ -21,7 +21,7 @@ na = jnp.newaxis
 def resample_continuous_stateseqs(seed, Y, mask, v, h, s, z,
                                   Cd, sigmasq, Ab, Q, **kwargs):
     """
-    Resamples the latent trajectories `x`.
+    Resamples the latent trajectories ``x``.
 
     Parameters
     ----------
@@ -65,7 +65,7 @@ def resample_continuous_stateseqs(seed, Y, mask, v, h, s, z,
 def resample_obs_variance(seed, Y, mask, Cd, x, v, h, s,
                           nu_sigma, sigmasq_0, **kwargs):
     """
-    Resample the observation variance `sigmasq`.
+    Resample the observation variance ``sigmasq``.
 
     Parameters
     ----------
@@ -106,7 +106,7 @@ def resample_obs_variance(seed, Y, mask, Cd, x, v, h, s,
 def resample_scales(seed, Y, x, v, h, Cd,
                     sigmasq, nu_s, s_0, **kwargs):
     """
-    Resample the scale values `s`.
+    Resample the scale values ``s``.
 
     Parameters
     ----------
@@ -126,7 +126,7 @@ def resample_scales(seed, Y, x, v, h, Cd,
         Unscaled noise.
     nu_s : int
         Chi-squared degrees of freedom in noise prior.
-    s_0 : scalar or jax array broadcastable to `Y`
+    s_0 : scalar or jax array broadcastable to ``Y``
         Prior on noise scale.
     **kwargs : dict
         Overflow, for convenience.
@@ -149,22 +149,22 @@ def compute_squared_error(Y, x, v, h, Cd, mask=None):
 
     Parameters
     ----------
-    Y : jax array of shape (*dims, k, d)
+    Y : jax array of shape (dims, k, d)
         Keypoint observations.
-    x : jax array of shape (*dims, latent_dim)
+    x : jax array of shape (dims, latent_dim)
         Latent trajectories.
-    v : jax array of shape (*dims, d)
+    v : jax array of shape (dims, d)
         Centroid positions.
-    h : jax array of shape (*dims)
+    h : jax array of shape (dims)
         Heading angles.
     Cd : jax array of shape ((k - 1) * d, latent_dim + 1)
         Observation transform.
-    mask : jax array of shape (*dims), optional
+    mask : jax array of shape (dims), optional
         Binary indicator for valid frames.
 
     Returns
     ------
-    sqerr : jax array of shape (*dims, k)
+    sqerr : jax array of shape (dims, k)
         Squared error between model predicted and
         true observations.
     """
@@ -178,7 +178,7 @@ def compute_squared_error(Y, x, v, h, Cd, mask=None):
 @jax.jit
 def resample_heading(seed, Y, x, v, s, Cd, sigmasq, **kwargs):
     """
-    Resample the heading angles `h`.
+    Resample the heading angles ``h``.
 
     Parameters
     ----------
@@ -228,7 +228,7 @@ def resample_heading(seed, Y, x, v, s, Cd, sigmasq, **kwargs):
 def resample_location(seed, Y, mask, x, h, s, Cd,
                       sigmasq, sigmasq_loc, **kwargs):
     """
-    Resample the centroid positions `v`.
+    Resample the centroid positions ``v``.
 
     Parameters
     ----------
@@ -306,14 +306,14 @@ def resample_model(data, seed, states, params, hypparams,
         Values for each model parameter.
     hypparams : dict
         Values for each group of hyperparameters.
-    noise_prior : scalar or jax array broadcastable to `s`
+    noise_prior : scalar or jax array broadcastable to ``s``
         Prior on noise scale.
     ar_only : bool, default=False
         Whether to restrict sampling to ARHMM components.
     states_only : bool, default=False
         Whether to restrict sampling to states.
     skip_noise : bool, default=False
-        Whether to exclude `sigmasq` and `s` from resampling.
+        Whether to exclude ``sigmasq`` and ``s`` from resampling.
     **kwargs : dict
         Overflow, for convenience.
 

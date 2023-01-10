@@ -12,21 +12,21 @@ from functools import partial
 def count_transitions(num_states, stateseqs, mask):
     """
     Count the number of transitions between each pair of
-    states `i` and `j` in the unmasked entries of `stateseqs`,
+    states ``i`` and ``j`` in the unmasked entries of ``stateseqs``,
     including self transitions (i.e. i == j).
 
     Parameters
     ----------
     num_states: int
-        Total number of states (must exceed `max(stateseqs)`).
+        Total number of states (must exceed ``max(stateseqs)``).
 
-    stateseqs: jax int array of shape (*dims, T)
+    stateseqs: jax int array of shape (dims, T)
         Batch of state sequences where the last dim indexes time.
         All entries 
 
-    mask: jax array of shape (*dims, T + num_lags)
+    mask: jax array of shape (dims, T + num_lags)
         Binary indicator for which elements of ``stateseqs`` are valid.
-        If `num_lags > 0`, the first `num_lags` time points of the mask
+        If ``num_lags > 0``, the first ``num_lags`` time points of the mask
         are ignored (ensures time alignment with the AR process).
 
     Returns
@@ -50,10 +50,10 @@ def _sample_crf_table_counts(seed, customer_counts, dish_ratings):
     """
     Samples table counts for a Chinese restaurant franchise (CRF) process
     with no loyalty factor. For a more comprehensive overview, see
-    `_sample_loyal_crf_table_counts`, for which this is a helper function.
+    py:func:`jax_moseq.utils.transitions._sample_loyal_crf_table_counts`, for which this is a helper function.
     
-    Params
-    ------
+    Parameters
+    ----------
     seed : int
         Value for random seed.
     customer_counts : numpy array of shape (N, N)
@@ -91,29 +91,29 @@ def _sample_crf_table_counts(seed, customer_counts, dish_ratings):
 def _sample_loyal_crf_table_counts(seed, customer_counts, dish_ratings, loyalty):
     """
     In a Chinese restaurant franchise (CRF) process with loyal customers,
-    `table_counts[i, j]` represents the number of tables in restaurant `i`
-    that considered dish `j`, which is a random variable that depends on:
+    ``table_counts[i, j]`` represents the number of tables in restaurant ``i``
+    that considered dish ``j``, which is a random variable that depends on:
 
         (1) the observed number of patrons in the restaurant eating
-            the dish (`customer_counts[i, j]`),
+            the dish (``customer_counts[i, j]``),
         (2) the franchise-wide popularity of the dish
-            (`dish_ratings[j]`), and
+            (``dish_ratings[j]``), and
         (3) the bias towards each restaurant's specialty dish
-            (i.e. the dish that shares its index `i`), which is
-            encoded by `loyalty`.
+            (i.e. the dish that shares its index ``i``), which is
+            encoded by ``loyalty``.
 
     This function samples that value for each restaurant/dish pair. In
     brief, each restaurant is a row of the transition matrix, each instance
-    of a customer in restaurant `i` eating dish `j` represents a transition
-    from `i` to `j`, and the number of tables that considered dish `j`
+    of a customer in restaurant ``i`` eating dish ``j`` represents a transition
+    from ``i`` to ``j``, and the number of tables that considered dish ``j``
     throughout the franchise is the sufficent statistic for the resampling of
-    the franchise-wide `dish_ratings` (analogous to `betas` scaled by `alpha`).
+    the franchise-wide ``dish_ratings`` (analogous to ``betas`` scaled by ``alpha``).
     For a more thorough overview of the analogy and its relevance to the HDP-HMM
     Gibbs sampling algorithm, see the reference (note the distinction between
     considering and choosing a dish).
 
-    Params
-    ------
+    Parameters
+    ----------
     seed : int
         Value for random seed.
     customer_counts : numpy array of shape (N, N)
@@ -152,11 +152,11 @@ def _sample_beta_suffient_stats(seed, transition_counts,
                                 betas, alpha, kappa, gamma):
     """
     Compute the sufficient statistics for the Gibbs resampling
-    of `betas` using the auxillary parameter scheme devised
+    of ``betas`` using the auxillary parameter scheme devised
     by Fox et al. for the Sticky HDP-HMM.
 
-    Params
-    ------
+    Parameters
+    ----------
     seed : jr.PRNGKey
         JAX random seed.
     transition_counts : jax array of shape (num_states, num_states)
@@ -178,11 +178,11 @@ def _sample_beta_suffient_stats(seed, transition_counts,
     num_states = len(betas)
     
     # Sample auxillary parameters (uses numpy/numba),
-    # denoted `m` or `m_bar` depending on the formulation.
+    # denoted ``m`` or ``m_bar`` depending on the formulation.
     seed = seed[0].item()
     concentrations = np.array(alpha * betas)
     transition_counts = np.array(transition_counts, dtype=np.int32)
-    # also known as `m` or `m_bar`, depending the formulation
+    # also known as ``m`` or ``m_bar``, depending the formulation
     auxillary_param = _sample_loyal_crf_table_counts(seed, transition_counts,
                                                      concentrations, kappa)
 
@@ -195,11 +195,11 @@ def _sample_beta_suffient_stats(seed, transition_counts,
 def sample_betas(seed, transition_counts,
                  betas, alpha, kappa, gamma):
     """
-    Sample the state usages `betas` given the observed transition
+    Sample the state usages ``betas`` given the observed transition
     counts and the model hyperparameters.
 
-    Params
-    ------
+    Parameters
+    ----------
     seed : jr.PRNGKey
         JAX random seed.
     transition_counts : jax array of shape (num_states, num_states)
@@ -226,11 +226,11 @@ def sample_betas(seed, transition_counts,
 
 def sample_pi(seed, transition_counts, betas, alpha, kappa):
     """
-    Sample the transition matrix `pi` given the observed transition
+    Sample the transition matrix ``pi`` given the observed transition
     counts, state usages, and model hyperparameters.
 
-    Params
-    ------
+    Parameters
+    ----------
     seed : jr.PRNGKey
         JAX random seed.
     transition_counts : jax array of shape (num_states, num_states)
@@ -261,8 +261,8 @@ def sample_hdp_transitions(seed, transition_counts,
     the observed transition counts, the current usage estimates,
     and the model hyperparameters.
 
-    Params
-    ------
+    Parameters
+    ----------
     seed : jr.PRNGKey
         JAX random seed.
     transition_counts : jax array of shape (num_states, num_states)
@@ -296,13 +296,13 @@ def resample_hdp_transitions(seed, z, mask, betas,
     """
     Resample the transition parameters of the HDP-HMM.
 
-    Params
-    ------
+    Parameters
+    ----------
     seed : jr.PRNGKey
         JAX random seed.
-    z : jax_array of shape (*dims, T - n_lags)
+    z : jax_array of shape (dims, T - n_lags)
         Discrete state sequences.
-    mask : jax array of shape (*dims, T)
+    mask : jax array of shape (dims, T)
         Binary indicator for which data points are valid.
     betas : jax array of shape num_states
         State usages.
@@ -312,7 +312,7 @@ def resample_hdp_transitions(seed, z, mask, betas,
         State persistence (i.e. "stickiness") hyperparameter.
     gamma : scalar
         Usage uniformity hyperparameter.
-    **kwargs : dict
+    kwargs : dict
         Overflow, for convenience.
 
     Returns
@@ -333,8 +333,8 @@ def init_hdp_transitions(seed, num_states, alpha, kappa, gamma, **kwargs):
     """
     Initialize the transition parameters of the HDP-HMM.
 
-    Params
-    ------
+    Parameters
+    ----------
     seed : jr.PRNGKey
         JAX random seed.
     num_states : int
@@ -347,7 +347,7 @@ def init_hdp_transitions(seed, num_states, alpha, kappa, gamma, **kwargs):
         State persistence (i.e. "stickiness") hyperparameter.
     gamma : scalar
         Usage uniformity hyperparameter.
-    **kwargs : dict
+    kwargs : dict
         Overflow, for convenience.
 
     Returns

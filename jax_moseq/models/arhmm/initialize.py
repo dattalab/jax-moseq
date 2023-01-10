@@ -157,22 +157,22 @@ def init_model(data=None,
     ----------
     data : dict, optional
         Data dictionary containing the observations and mask.
-        Must be provided if `states` not precomputed.
+        Must be provided if ``states`` not precomputed.
     states : dict, optional
         State values for each latent variable, if precomputed.
     params : dict, optional
         Values for each model parameter, if precomputed.
     hypparams : dict, optional
         Values for each group of hyperparameters. If not provided,
-        caller must provide each arg of `init_hypparams`.
+        caller must provide each arg of ``init_hypparams``.
     seed : int or jr.PRNGKey, default=jr.PRNGKey(0)
         Initial JAX random seed.
     trans_hypparams : dict, optional
         HDP transition hyperparameters. Must be provided if
-        `hypparams` not provided.
+        ``hypparams`` not provided.
     ar_hypparams : dict, optional
         Autoregression hyperparameters. Must be provided if
-        `hypparams` not provided.
+        ``hypparams`` not provided.
     verbose : bool, default=False
         Whether to print progress info during initialization.
     **kwargs : dict, optional
@@ -232,7 +232,7 @@ def init_model(data=None,
 def _check_init_args(data, states, params, hypparams,
                      trans_hypparams, ar_hypparams):
     """
-    Helper method for `init_model` that ensures a sufficient subset
+    Helper method for ``init_model`` that ensures a sufficient subset
     of the initialization arguments have been provided by the caller.
     
     Parameters
