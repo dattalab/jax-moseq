@@ -27,27 +27,7 @@ def ar_log_likelihood(x, params):
 def get_lags(x, nlags):
     """
     Get lags of a multivariate time series. Lags are concatenated along
-    the last dim in time-order. So if the last rows of ``x`` look like
-
-    .. math::
-
-        \begin{bmatrix} 
-            x_{t-2}     \\
-            x_{t-1}     \\
-            x_{t} 
-        \end{bmatrix}
-
-
-    then with ``nlags=3`` they would become
-
-    .. math::
-
-        \begin{bmatrix} 
-            x_{t-5} & x_{t-4} & x_{t-3} \\
-            x_{t-4} & x_{t-3} & x_{t-2} \\
-            x_{t-3} & x_{t-2} & x_{t-1}
-        \end{bmatrix}  
-
+    the last dim in time-order. 
 
     Parameters
     ----------  

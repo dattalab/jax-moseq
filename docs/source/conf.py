@@ -53,14 +53,11 @@ exclude_patterns = ['_build']
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
-html_theme = 'sphinx_book_theme'
+html_theme = 'sphinx_rtd_theme'
 
 html_theme_options = {
-    'repository_url': 'https://github.com/dattalab/jax-moseq',
-    "use_repository_button": True,
-    "use_download_button": False,
-    'repository_branch': 'main',
-    "path_to_docs": 'docs',
+    'navigation_depth': -1,
+    'titles_only': False
 }
 
 autosummary_generate = True
