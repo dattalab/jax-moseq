@@ -46,53 +46,11 @@ def count_transitions(num_states, stateseqs, mask):
 
 
 @njit
-def _sample_crf_table_counts(seed, customer_counts, dish_ratings):
-    """
-    Samples table counts for a Chinese restaurant franchise (CRF) process
-    with no loyalty factor. For a more comprehensive overview, see
-    py:func:`jax_moseq.utils.transitions._sample_loyal_crf_table_counts`, for which this is a helper function.
-    
-    Parameters
-    ----------
-    seed : int
-        Value for random seed.
-    customer_counts : numpy array of shape (N, N)
-        Number of customers for each restaurant/dish pair.
-    concentrations : numpy array of shape N
-        Parameter representing franchise-wide popularity of each dish.
-        
-    Returns
-    -------
-    table_counts : numpy array of shape (N, N)
-        Number of tables in each restaurant that considered each dish.
-
-    Notes
-    -----
-    This is implemented in numpy/numba because jax dislikes operations
-    with hetereogenous numbers of loop iterations.
-    """
-    np.random.seed(seed)
-    N = len(dish_ratings)    # num restaurants/dishes
-
-    # Sample counts without considering loyalty factor
-    table_counts = np.zeros_like(customer_counts)
-    for i in prange(N):
-        for j in range(N):
-            # Sample counts by simulating table dish
-            # assignment process.
-            for k in range(customer_counts[i, j]):
-                dish_rating = dish_ratings[j]
-                p = dish_ratings[j] / (k + dish_ratings[j])
-                bernoulli_sample = np.random.random() < p
-                table_counts[i, j] += bernoulli_sample
-    return table_counts
-
-
 def _sample_loyal_crf_table_counts(seed, customer_counts, dish_ratings, loyalty):
     """
     In a Chinese restaurant franchise (CRF) process with loyal customers,
     ``table_counts[i, j]`` represents the number of tables in restaurant ``i``
-    that considered dish ``j``, which is a random variable that depends on:
+    that were served dish ``j``, which is a random variable that depends on:
 
         (1) the observed number of patrons in the restaurant eating
             the dish (``customer_counts[i, j]``),
@@ -105,12 +63,12 @@ def _sample_loyal_crf_table_counts(seed, customer_counts, dish_ratings, loyalty)
     This function samples that value for each restaurant/dish pair. In
     brief, each restaurant is a row of the transition matrix, each instance
     of a customer in restaurant ``i`` eating dish ``j`` represents a transition
-    from ``i`` to ``j``, and the number of tables that considered dish ``j``
-    throughout the franchise is the sufficent statistic for the resampling of
-    the franchise-wide ``dish_ratings`` (analogous to ``betas`` scaled by ``alpha``).
+    from ``i`` to ``j``, and the number of tables that served dish ``j``
+    throughout the franchise is used (after a correction step) for the resampling
+    of the franchise-wide ``dish_ratings`` (analogous to ``betas`` scaled by ``alpha``).
     For a more thorough overview of the analogy and its relevance to the HDP-HMM
-    Gibbs sampling algorithm, see the reference (note the distinction between
-    considering and choosing a dish).
+    Gibbs sampling algorithm, see the reference (where `table_counts` corresponds
+    to the auxillary parameter m).
 
     Parameters
     ----------
@@ -127,24 +85,30 @@ def _sample_loyal_crf_table_counts(seed, customer_counts, dish_ratings, loyalty)
     Returns
     -------
     table_counts : numpy array of shape (N, N)
-        Number of tables in each restaurant that considered each dish.
+        Number of tables in each restaurant served each dish.
 
     References
     ----------
     See the supplement to Fox et al. 2011 at
     <http://dx.doi.org/10.1214/10-AOAS395SUPP>.
     """
-    # Obtain uncorrected table counts
-    table_counts = _sample_crf_table_counts(seed, customer_counts,
-                                            dish_ratings)
-    
-    # Downsample the influence of self-transitions, which are presumed
-    # to result from restauraunt loyalty and are therefore less
-    # informative about franchise-wide popularity ratings
-    diagonal_counts = np.diag(table_counts)
-    p = dish_ratings / (dish_ratings + loyalty)
-    binomial_samples = np.random.binomial(diagonal_counts, p)
-    np.fill_diagonal(table_counts, binomial_samples)
+    np.random.seed(seed)
+    N = len(dish_ratings)    # num restaurants/dishes
+
+    # Sample counts without considering loyalty factor
+    table_counts = np.zeros_like(customer_counts)
+    for i in prange(N):
+        for j in range(N):
+            # Sample counts by simulating table dish
+            # assignment process.
+            for k in range(customer_counts[i, j]):
+                dish_rating = dish_ratings[j]
+                if i == j:
+                    # Account for loyalty factor
+                    dish_rating += loyalty
+                p = dish_rating / (k + dish_rating)
+                bernoulli_sample = np.random.random() < p
+                table_counts[i, j] += bernoulli_sample
     return table_counts
 
 
@@ -177,15 +141,22 @@ def _sample_beta_suffient_stats(seed, transition_counts,
     """
     num_states = len(betas)
     
-    # Sample auxillary parameters (uses numpy/numba),
-    # denoted ``m`` or ``m_bar`` depending on the formulation.
+    # Sample table counts (uses numpy/numba)
     seed = seed[0].item()
     concentrations = np.array(alpha * betas)
     transition_counts = np.array(transition_counts, dtype=np.int32)
-    # also known as ``m`` or ``m_bar``, depending the formulation
-    auxillary_param = _sample_loyal_crf_table_counts(seed, transition_counts,
-                                                     concentrations, kappa)
-
+    # m in Fox et al.
+    table_counts = _sample_loyal_crf_table_counts(seed, transition_counts,
+                                                  concentrations, kappa)
+    
+    # Downweight the influence of self transitions,
+    # which are less informative about state usages
+    auxillary_param = table_counts    # corresponds to mbar in Fox et al.
+    diagonal_counts = np.diag(auxillary_param)
+    p = concentrations / (concentrations + kappa)
+    binomial_samples = np.random.binomial(diagonal_counts, p)
+    np.fill_diagonal(auxillary_param, binomial_samples)
+    
     # Compute sufficient statistics
     sufficient_stats = auxillary_param.sum(0) + (gamma / num_states)
     sufficient_stats = jax.device_put(sufficient_stats)
