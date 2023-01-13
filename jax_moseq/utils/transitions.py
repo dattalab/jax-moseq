@@ -20,11 +20,11 @@ def count_transitions(num_states, stateseqs, mask):
     num_states: int
         Total number of states (must exceed ``max(stateseqs)``).
 
-    stateseqs: jax int array of shape (dims, T)
+    stateseqs: jax int array of shape (..., T)
         Batch of state sequences where the last dim indexes time.
         All entries 
 
-    mask: jax array of shape (dims, T + num_lags)
+    mask: jax array of shape (..., T + num_lags)
         Binary indicator for which elements of ``stateseqs`` are valid.
         If ``num_lags > 0``, the first ``num_lags`` time points of the mask
         are ignored (ensures time alignment with the AR process).
@@ -271,11 +271,11 @@ def resample_hdp_transitions(seed, z, mask, betas,
     ----------
     seed : jr.PRNGKey
         JAX random seed.
-    z : jax_array of shape (dims, T - n_lags)
+    z : jax_array of shape (..., T - n_lags)
         Discrete state sequences.
-    mask : jax array of shape (dims, T)
+    mask : jax array of shape (..., T)
         Binary indicator for which data points are valid.
-    betas : jax array of shape num_states
+    betas : jax array of shape (num_states,)
         State usages.
     alpha : scalar
         State usage influence hyperparameter. 
@@ -288,7 +288,7 @@ def resample_hdp_transitions(seed, z, mask, betas,
 
     Returns
     -------
-    betas : jax array of shape num_states
+    betas : jax array of shape (num_states,)
         Resampled state usages.
     pi : jax_array of shape (num_states, num_states)
         Resampled transition probabilities.
@@ -310,7 +310,7 @@ def init_hdp_transitions(seed, num_states, alpha, kappa, gamma, **kwargs):
         JAX random seed.
     num_states : int
         Max number of HMM states.
-    betas : jax array of shape num_states
+    betas : jax array of shape (num_states,)
         State usages.
     alpha : scalar
         State usage influence hyperparameter. 
@@ -323,7 +323,7 @@ def init_hdp_transitions(seed, num_states, alpha, kappa, gamma, **kwargs):
 
     Returns
     -------
-    betas : jax array of shape num_states
+    betas : jax array of shape (num_states,)
         Initial state usages.
     pi : jax_array of shape (num_states, num_states)
         Initial transition probabilities.

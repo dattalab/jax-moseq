@@ -11,7 +11,7 @@ def discrete_stateseq_log_prob(z, pi, **kwargs):
 
     Parameters
     ----------
-    z : jax_array of shape (dims, T - n_lags)
+    z : jax_array of shape (..., T - n_lags)
         Discrete state sequences.
     pi : jax_array of shape (num_states, num_states)
         Transition probabilities.
@@ -20,7 +20,7 @@ def discrete_stateseq_log_prob(z, pi, **kwargs):
 
     Returns
     -------
-    log_pz : jax array of shape (dims, T - 1)
+    log_pz : jax array of shape (..., T - 1)
         Log probability of ``z``.
     """
     return jnp.log(pi[z[...,:-1],z[...,1:]])
@@ -33,9 +33,9 @@ def continuous_stateseq_log_prob(x, z, Ab, Q, **kwargs):
 
     Parameters
     ----------  
-    x : jax array of shape (dims, T, latent_dim)
+    x : jax array of shape (..., T, latent_dim)
         Latent trajectories.
-    z : jax_array of shape (dims, T - n_lags)
+    z : jax_array of shape (..., T - n_lags)
         Discrete state sequences.
     Ab : jax array of shape (num_states, latent_dim, ar_dim)
         Autoregressive transforms.
@@ -46,7 +46,7 @@ def continuous_stateseq_log_prob(x, z, Ab, Q, **kwargs):
 
     Returns
     -------
-    log_px : jax array of shape (dims, T - n_lags)
+    log_px : jax array of shape (..., T - n_lags)
         Log probability of ``x``.
     """
     return ar_log_likelihood(x, (Ab[z], Q[z]))
@@ -59,11 +59,11 @@ def log_joint_likelihood(x, mask, z, pi, Ab, Q, **kwargs):
 
     Parameters
     ----------
-    x : jax array of shape (dims, T, latent_dim)
+    x : jax array of shape (..., T, latent_dim)
         Latent trajectories.
-    mask : jax array of shape (dims)
+    mask : jax array
         Binary indicator for which data points are valid.
-    z : jax_array of shape (dims, T - n_lags)
+    z : jax_array of shape (..., T - n_lags)
         Discrete state sequences.
     pi : jax_array of shape (num_states, num_states)
         Transition probabilities.

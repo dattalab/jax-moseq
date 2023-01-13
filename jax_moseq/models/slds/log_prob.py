@@ -17,7 +17,7 @@ def scale_log_prob(s, s_0, nu_s, **kwargs):
 
     Parameters
     ----------
-    s : jax array of shape (dims)
+    s : jax array
         Noise scales.
     s_0 : scalar or jax array, broadcastable to `s`
         Prior on noise scale.
@@ -28,7 +28,7 @@ def scale_log_prob(s, s_0, nu_s, **kwargs):
 
     Returns
     -------
-    log_ps: jax array of shape (dims)
+    log_ps: jax array
         Log probability of `s`.
     """
     return -nu_s * s_0 / s / 2 - (1 + nu_s / 2) * jnp.log(s)
@@ -42,11 +42,11 @@ def obs_log_prob(Y, x, s, Cd, sigmasq, **kwargs):
 
     Parameters
     ----------
-    Y : jax array of shape (dims, obs_dim)
+    Y : jax array of shape (..., obs_dim)
         Observations.
-    x : jax array of shape (dims, latent_dim)
+    x : jax array of shape (..., latent_dim)
         Latent trajectories.
-    s : jax array of shape (dims, obs_dim)
+    s : jax array of shape (..., obs_dim)
         Noise scales.
     Cd : jax array of shape (obs_dim, latent_dim + 1)
         Observation transform.
@@ -57,7 +57,7 @@ def obs_log_prob(Y, x, s, Cd, sigmasq, **kwargs):
 
     Returns
     -------
-    log_pY: jax array of shape (dims, obs_dim)
+    log_pY: jax array of shape (..., obs_dim)
         Log probability of `Y`.
     """
     Y_bar = apply_affine(x, Cd)
@@ -72,15 +72,15 @@ def log_joint_likelihood(Y, mask, x, s, z, pi, Ab, Q, Cd, sigmasq, s_0, nu_s, **
 
     Parameters
     ----------
-    Y : jax array of shape (dims, T, obs_dim)
+    Y : jax array of shape (..., T, obs_dim)
         Observations.
-    mask : jax array of shape (dims, T)
+    mask : jax array of shape (..., T)
         Binary indicator for valid frames.
-    x : jax array of shape (dims, T, latent_dim)
+    x : jax array of shape (..., T, latent_dim)
         Latent trajectories.
-    s : jax array of shape (dims, T, obs_dim)
+    s : jax array of shape (..., T, obs_dim)
         Noise scales.
-    z : jax_array of shape (dims, T - n_lags)
+    z : jax_array of shape (..., T - n_lags)
         Discrete state sequences.
     pi : jax_array of shape (num_states, num_states)
         Transition probabilities.

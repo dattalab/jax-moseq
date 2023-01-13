@@ -40,9 +40,9 @@ def fit_pca(Y, mask, PCA_fitting_num_frames=1000000,
 
     Parameters
     ----------   
-    Y: jax array, shape (dims, d)
+    Y: jax array, shape (..., d)
         Keypoint coordinates
-    mask: jax array, shape (dims)
+    mask: jax array
         Binary indicator for which elements of ``Y`` are valid
     PCA_fitting_num_frames: int, default=1000000
         Maximum number of frames to use for PCA. Frames will be sampled

@@ -149,22 +149,22 @@ def compute_squared_error(Y, x, v, h, Cd, mask=None):
 
     Parameters
     ----------
-    Y : jax array of shape (dims, k, d)
+    Y : jax array of shape (..., k, d)
         Keypoint observations.
-    x : jax array of shape (dims, latent_dim)
+    x : jax array of shape (..., latent_dim)
         Latent trajectories.
-    v : jax array of shape (dims, d)
+    v : jax array of shape (..., d)
         Centroid positions.
-    h : jax array of shape (dims)
+    h : jax array
         Heading angles.
     Cd : jax array of shape ((k - 1) * d, latent_dim + 1)
         Observation transform.
-    mask : jax array of shape (dims), optional
+    mask : jax array, optional
         Binary indicator for valid frames.
 
     Returns
     ------
-    sqerr : jax array of shape (dims, k)
+    sqerr : jax array of shape (..., k)
         Squared error between model predicted and
         true observations.
     """

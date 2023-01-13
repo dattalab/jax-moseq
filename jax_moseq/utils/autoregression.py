@@ -34,12 +34,12 @@ def get_lags(x, nlags):
     nlags: int
         Number of lags
         
-    x: jax array, shape (dims, t, d)
+    x: jax array, shape (..., t, d)
         Batch of d-dimensional time series 
     
     Returns
     -------
-    x_lagged: jax array, shape (dims, t-nlags, d*nlags)
+    x_lagged: jax array, shape (..., t-nlags, d*nlags)
 
     """
     lags = [jnp.roll(x, t, axis=-2) for t in range(1, nlags + 1)]

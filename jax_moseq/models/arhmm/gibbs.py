@@ -116,11 +116,11 @@ def _resample_regression_params(seed, mask, x_in, x_out,
     ----------
     seed : jr.PRNGKey
         JAX random seed.
-    mask : jax array of shape (dims)
+    mask : jax array
         Binary indicator for valid frames.
-    x_in : jax array of shape (dims, in_dim)
+    x_in : jax array of shape (..., in_dim)
         Regression input.
-    x_out : jax array of shape (dims, out_dim)
+    x_out : jax array of shape (..., out_dim)
         Regression output.
     nu_0 : int
         Inverse-Wishart degrees of freedom parameter for Q.
