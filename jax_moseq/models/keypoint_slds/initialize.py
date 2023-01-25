@@ -37,7 +37,7 @@ def init_states(seed, Y, mask, params, noise_prior, obs_hypparams,
     h : jax array of shape (N, T), optional
         Initial heading angles.
     **kwargs : dict, optional
-        Arguments to py:func:`jax_moseq.models.keypoint_slds.alignment.preprocess_for_pca`, as a substitute for
+        Arguments to :py:func:`jax_moseq.models.keypoint_slds.alignment.preprocess_for_pca`, as a substitute for
         ``Y_flat``, ``v``, or ``h``.
         
     Returns
@@ -189,10 +189,10 @@ def init_model(data=None,
     conf_threshold : float, default=0.5
         Confidence threshold below which points are interpolated
         in PCA fitting and heading/position initialization. See
-        py:func:`jax_moseq.models.keypoint_slds.alignment.preprocess_for_pca` for details.
+        :py:func:`jax_moseq.models.keypoint_slds.alignment.preprocess_for_pca` for details.
     error_estimator : dict, optional
         Parameters used to initialize ``noise_prior``. Must be provided
-        if ``data`` contains confidences. See py:func:`jax_moseq.models.keypoint_slds.initialize.estimate_error` for details.
+        if ``data`` contains confidences. See :py:func:`jax_moseq.models.keypoint_slds.initialize.estimate_error` for details.
     trans_hypparams : dict, optional
         HDP transition hyperparameters. Must be provided if
         ``hypparams`` not provided.
@@ -322,7 +322,7 @@ def _check_init_args(data, states, params, hypparams,
                      has_conf, noise_prior, error_estimator,
                      anterior_idxs, posterior_idxs):
     """
-    Helper method for py:func:`jax_moseq.models.initialize.init_model` that ensures a sufficient subset
+    Helper method for :py:func:`jax_moseq.models.initialize.init_model` that ensures a sufficient subset
     of the initialization arguments have been provided by the caller.
     
     Parameters
