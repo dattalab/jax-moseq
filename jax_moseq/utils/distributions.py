@@ -1,6 +1,8 @@
 import jax, jax.numpy as jnp, jax.random as jr
 import tensorflow_probability.substrates.jax.distributions as tfd
 
+from dynamax.hidden_markov_model.inference import hmm_posterior_sample
+
 def sample_vonmises(seed, theta, kappa):
     return tfd.VonMises(theta, kappa).sample(seed=seed)
 
@@ -15,9 +17,6 @@ def sample_scaled_inv_chi2(seed, degs, variance):
 
 def sample_chi2(seed, degs):
     return jr.gamma(seed, degs/2)*2
-
-def sample_discrete(seed, distn,dtype=jnp.int32):
-    return jr.categorical(seed, jnp.log(distn))
 
 def sample_mn(seed, M, U, V):
     G = jr.normal(seed,M.shape)
@@ -43,40 +42,26 @@ def sample_mniw(seed, nu, S, M, K):
     A = sample_mn(seed, M, sigma, K)
     return A, sigma
 
-def sample_hmm_stateseq(seed, log_likelihoods, mask, pi):
-    """
-    Use the forward-backward algorithm to sample state-sequences in a Markov chain.
+def sample_hmm_stateseq(seed, transition_matrix, log_likelihoods, mask):
+    """Sample state sequences in a Markov chain.
     
+    TODO Pass in initial_distribution (Array[num_states])
+
+    Parameters
+        seed (PRNGKey)
+        transition_matrix (Array[num_states, num_states])
+        log_likelihoods (Array[num_timesteps]): sequence of log likelihoods of
+            emissions given hidden state and parameters
+        mask (BoolArray[num_timesteps]): sequence indicating whether to use an
+            emission (1) or not (0)
+
+    Returns
+        log_norm (float): Posterior marginal log likelihood
+        states (IntArray[num_timesteps]): sequence of sampled states
     """
-    def _forward_message(carry, args):
-        ll_t, mask_t = args
-        in_potential, logtot = carry
-        cmax = ll_t.max()
-        alphan_t = in_potential * jnp.exp(ll_t - cmax)
-        norm = alphan_t.sum() + 1e-16
-        alphan_t = alphan_t / norm
-        logprob = jnp.log(norm) + cmax
-        in_potential = alphan_t.dot(pi)*mask_t + in_potential*(1-mask_t)
-        return (in_potential, logtot + logprob*mask_t), alphan_t    
 
-    def _sample(args):
-        seed, next_potential, alphan_t = args
-        seed, newseed = jr.split(seed)
-        s = sample_discrete(newseed, next_potential * alphan_t)
-        next_potential = pi[:,s]
-        return (seed,next_potential), s
+    num_states = transition_matrix.shape[0]
+    initial_distribution = jnp.ones(num_states)/num_states
 
-    def _backward_message(carry, args):
-        seed, next_potential = carry
-        alphan_t, mask_t = args
-        return jax.lax.cond(
-            mask_t>0, _sample, 
-            lambda args: (args[:-1],0), 
-            (seed, next_potential, alphan_t))
-        
-    init_distn = jnp.ones(pi.shape[0])/pi.shape[0]
-    (_,log_likelihood), alphan = jax.lax.scan(_forward_message,  (init_distn,0.), (log_likelihoods, mask))
-    
-    init_potential = jnp.ones(pi.shape[0])
-    _,stateseq = jax.lax.scan(_backward_message, (seed,init_potential), (alphan,mask), reverse=True)
-    return stateseq, log_likelihood
+    masked_log_likelihoods = log_likelihoods * mask[:,None]
+    return hmm_posterior_sample(seed, initial_distribution, transition_matrix, masked_log_likelihoods)
