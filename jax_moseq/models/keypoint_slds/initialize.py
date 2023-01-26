@@ -266,7 +266,7 @@ def init_model(data=None,
 
         if pca is None:
             if not exclude_outliers_for_pca or conf is None: pca_mask = mask
-            else: pca_mask = jnp.logical_and(mask, (conf > conf_threshold).any(-1))
+            else: pca_mask = jnp.logical_and(mask, (conf > conf_threshold).all(-1))
             pca = utils.fit_pca(Y_flat, pca_mask, PCA_fitting_num_frames, verbose)
 
         params = init_params(
