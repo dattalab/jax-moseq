@@ -21,6 +21,7 @@ setuptools.setup(
         'jax',
         'numpy',
         'scikit-learn',
+        'dynamax'
     ], 
     url='https://github.com/dattalab/jax-moseq'
 )
