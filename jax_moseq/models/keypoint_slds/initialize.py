@@ -149,7 +149,7 @@ def init_model(data=None,
                cen_hypparams=None,
                
                verbose=False,
-               exclude_outliers_for_pca=False,
+               exclude_outliers_for_pca=True,
                **kwargs):
     """
     Initialize a keypoint SLDS model dict containing the
@@ -208,6 +208,10 @@ def init_model(data=None,
         ``hypparams`` not provided.
     verbose : bool, default=False
         Whether to print progress info during initialization.
+    exclude_outliers_for_pca : bool, default=True
+        Whether to exclude frames with low-confidence keypoints.
+        If False, then the low-confidence keypoint coordinates are l
+        inearly interpolated.
     **kwargs : dict, optional
         Unused. For convenience, enables user to invoke function
         by unpacking dict that contains keys not used by the method.
