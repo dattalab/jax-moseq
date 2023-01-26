@@ -7,9 +7,9 @@ Code for fitting state-space models with Gibbs sampling.
 1. If you plan to use a GPU (recommended), install the appropriate driver and CUDA version. CUDA ≥11.1 and cuDNN ≥8.2 are required. [This section of the DeepLabCut docs](https://deeplabcut.github.io/DeepLabCut/docs/installation.html#gpu-support) may be helpful.
 
 
-2. Install [Anaconda](https://docs.anaconda.com/anaconda/install/index.html) or [Miniconda](https://docs.conda.io/en/latest/miniconda.html). Create and activate an environment called `keypoint_moseq` with python 3.9:
+2. Install [Anaconda](https://docs.anaconda.com/anaconda/install/index.html) or [Miniconda](https://docs.conda.io/en/latest/miniconda.html). Create and activate an environment called `jax_moseq` with python 3.9:
 ```
-conda create -n keypoint_moseq python=3.9
+conda create -n jax_moseq python=3.9
 conda activate jax_moseq
 ```
 

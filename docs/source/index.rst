@@ -16,7 +16,7 @@ If you plan to use a GPU (recommended), install the appropriate driver and CUDA 
 
 .. code-block::
 
-   conda create -n keypoint_moseq python=3.9
+   conda create -n jax_moseq python=3.9
    conda activate jax_moseq
 
 Install jax using one of the lines below
