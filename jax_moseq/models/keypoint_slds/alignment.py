@@ -260,7 +260,9 @@ def vector_to_angle(V):
 
 def fit_pca(Y, mask, anterior_idxs, posterior_idxs,
             conf=None, conf_threshold=0.5, verbose=False,
-            PCA_fitting_num_frames=1000000, **kwargs):
+            PCA_fitting_num_frames=1000000, 
+            exclude_outliers_for_pca=True,
+            **kwargs):
     """
     Fit a PCA model to transformed keypoint coordinates. If ``conf`` is
     not None, perform linear interpolation over outliers defined by
@@ -284,6 +286,10 @@ def fit_pca(Y, mask, anterior_idxs, posterior_idxs,
         Whether to print progress updates.
     PCA_fitting_num_frames : int, default=1000000
         Maximum number of frames for PCA fitting.
+    exclude_outliers_for_pca : bool, default=True
+        Whether to exclude frames with low-confidence keypoints.
+        If False, then the low-confidence keypoint coordinates are l
+        inearly interpolated.
     **kwargs : dict
         Overflow, for convenience.
 
@@ -292,10 +298,12 @@ def fit_pca(Y, mask, anterior_idxs, posterior_idxs,
     pca, sklearn.decomposition._pca.PCA
         PCA object fit to observations.
     """
-    Y_flat = preprocess_for_pca(Y, anterior_idxs,
-                                posterior_idxs, conf,
-                                conf_threshold, verbose)[0]
-    return utils.fit_pca(Y_flat, mask, PCA_fitting_num_frames, verbose)
+    Y_flat = preprocess_for_pca(
+        Y, anterior_idxs, posterior_idxs, conf, conf_threshold, verbose)[0]
+    
+    if not exclude_outliers_for_pca or conf is None: pca_mask = mask
+    else: pca_mask = jnp.logical_and(mask, (conf > conf_threshold).any(-1))
+    return utils.fit_pca(Y_flat, pca_mask, PCA_fitting_num_frames, verbose)
 
 
 def preprocess_for_pca(Y, anterior_idxs, posterior_idxs,
@@ -332,7 +340,8 @@ def preprocess_for_pca(Y, anterior_idxs, posterior_idxs,
         outliers = (conf < conf_threshold)
         if verbose:
             n = outliers.sum()
-            print(f'PCA: Interpolating {n} low-confidence keypoints')
+            pct = round(outliers.mean() * 100,2)
+            print(f'Interpolating {n} ({pct}) low-confidence keypoints')
         Y = interpolate(Y, outliers)
 
     Y_aligned, v, h = align_egocentric(Y, anterior_idxs,
