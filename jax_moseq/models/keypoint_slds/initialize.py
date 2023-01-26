@@ -149,6 +149,7 @@ def init_model(data=None,
                cen_hypparams=None,
                
                verbose=False,
+               exclude_outliers_for_pca=False,
                **kwargs):
     """
     Initialize a keypoint SLDS model dict containing the
@@ -232,52 +233,46 @@ def init_model(data=None,
     
     model = {}
     
-    if has_conf:
-        conf = data['conf']
-    else:
-        conf = None
+    if has_conf: conf = data['conf']
+    else: conf = None
 
     if not (states and params):
         Y, mask = data['Y'], data['mask']
-        Y_flat, v, h = preprocess_for_pca(Y, anterior_idxs,
-                                          posterior_idxs, conf,
-                                          conf_threshold, verbose)
+        Y_flat, v, h = preprocess_for_pca(
+            Y, anterior_idxs, posterior_idxs, conf, conf_threshold, verbose)
 
     if isinstance(seed, int):
         seed = jr.PRNGKey(seed)
     model['seed'] = seed
 
     if hypparams is None:
-        if verbose:
-            print('Keypoint SLDS: Initializing hyperparameters')
-        hypparams = init_hyperparams(trans_hypparams, ar_hypparams,
-                                     obs_hypparams, cen_hypparams)
+        if verbose: print('Keypoint SLDS: Initializing hyperparameters')
+        hypparams = init_hyperparams(
+            trans_hypparams, ar_hypparams, obs_hypparams, cen_hypparams)
     else:
         hypparams = device_put_as_scalar(hypparams)
     model['hypparams'] = hypparams
     
     if noise_prior is None:
-        if verbose:
-            print('Keypoint SLDS: Initializing noise prior')
-        if has_conf:
-            noise_prior = estimate_error(conf, **error_estimator)
-        else:
-            noise_prior = 1.    # TODO: magic number
-    else:
+        if verbose: print('Keypoint SLDS: Initializing noise prior')
+        if has_conf: noise_prior = estimate_error(conf, **error_estimator)
+        else: noise_prior = 1.    # TODO: magic number
+    else: 
         noise_prior = jax.device_put(noise_prior)
     model['noise_prior'] = noise_prior
 
     if params is None:
-        if verbose:
-            print('Keypoint SLDS: Initializing parameters')
+        if verbose: print('Keypoint SLDS: Initializing parameters')
+
         if pca is None:
-            pca = utils.fit_pca(Y_flat, mask,
-                                PCA_fitting_num_frames, verbose)
-        k = Y.shape[-2]
-        params = init_params(seed, pca, Y_flat, mask,
-                             **hypparams, whiten=whiten, k=k)
-    else:
-        params = jax.device_put(params)
+            if not exclude_outliers_for_pca or conf is None: pca_mask = mask
+            else: pca_mask = jnp.logical_and(mask, (conf > conf_threshold).any(-1))
+            pca = utils.fit_pca(Y_flat, pca_mask, PCA_fitting_num_frames, verbose)
+
+        params = init_params(
+            seed, pca, Y_flat, mask, **hypparams, whiten=whiten, k=Y.shape[-2])
+    
+    else: params = jax.device_put(params)
     model['params'] = params
 
     if states is None:
