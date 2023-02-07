@@ -340,8 +340,9 @@ def preprocess_for_pca(Y, anterior_idxs, posterior_idxs,
         outliers = (conf < conf_threshold)
         if verbose:
             n = outliers.sum()
-            pct = round(outliers.mean() * 100,1)
-            print(f'Interpolating {n} ({pct}%) low-confidence keypoints')
+            pct = outliers.mean() * 100
+            if verbose:
+                print(f'Interpolating {n} ({pct:.1f}%) low-confidence keypoints')
         Y = interpolate(Y, outliers)
 
     Y_aligned, v, h = align_egocentric(Y, anterior_idxs,
