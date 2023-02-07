@@ -109,15 +109,16 @@ def ar_to_lds(Ab, Q, Cd=None):
         AR affine transform
     Q: jax array, shape (..., D, D)
         AR noise covariance
-    Cs: jax array, shape (..., D_obs, D)
-        obs transformation
+    Cd: jax array, shape (..., D_obs, D+1)
+        Observation affine transformation
     
     Returns
     -------
-    As_: jax array, shape (..., D*L, D*L)
-    bs_: jax array, shape (..., D*L)    
-    Qs_: jax array, shape (..., D*L, D*L)  
-    Cs_: jax array, shape (..., D_obs, D*L)
+    A_: jax array, shape (..., D*L, D*L)
+    b_: jax array, shape (..., D*L)    
+    Q_: jax array, shape (..., D*L, D*L)  
+    C_: jax array, shape (..., D_obs, D*L)
+    d_: jax array, shape (..., D_obs)
     """    
     nlags = get_nlags(Ab)
     latent_dim = Ab.shape[-2]
