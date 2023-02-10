@@ -269,6 +269,7 @@ def resample_location(seed, Y, mask, x, h, s, Cd,
                     Y - Y_rot, gammasq / variance)
 
     # Apply Kalman filter to get smooth headings
+    # TODO Parameterize these distributional hyperparameter
     seed = jr.split(seed, mask.shape[0])
     m0 = jnp.zeros(d)
     S0 = jnp.eye(d) * 1e6
