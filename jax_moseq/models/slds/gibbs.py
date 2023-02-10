@@ -89,6 +89,11 @@ def resample_continuous_stateseqs(seed, y, mask, z, s, Ab,
 
     # ==================================================
     # 4. Apply vectorized Kalman sample to each session
+    # Shapes of time-varying parameters going into the Kalman sampler are
+    #   ys:     (n_timesteps-n_lags+1, obs_dim), corresponding to timesteps  [L-1, T)
+    #   mask:   (n_timesteps-n_lags+1,)
+    #   zs:     (n_timesteps-n_lags,), corresponding to timesteps [L, T]
+    #   Rs:     (n_timesteps-n_lags+1, obs_dim)
     # ==================================================
     in_axes = (0, 0, 0, 0, na, na, na, na, na, na, na, 0, na, na)
     x = jax.vmap(kalman_sample, in_axes)(
