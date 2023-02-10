@@ -280,10 +280,22 @@ def resample_location(seed, Y, mask, x, h, s, Cd,
     R = jnp.repeat(gammasq, d, axis=-1)
     zz = jnp.zeros_like(mask[:,1:], dtype=int)
 
-    in_axes = (0,0,0,0,na,na,na,na,na,na,na,0)
+    masked_dynamics_noise = sigmasq_loc * 10
+    masked_obs_noise = sigmasq.max() * 10
+
+    masked_dynamics_params = {
+        'weights': jnp.eye(d),
+        'bias': jnp.zeros(d),
+        'cov': jnp.eye(d) * masked_dynamics_noise,
+    }
+
+    masked_obs_noise_diag = jnp.ones(d) * masked_obs_noise
+
+    in_axes = (0,0,0,0,na,na,na,na,na,na,na,0,na,na)
     v = jax.vmap(kalman_sample, in_axes)(
-        seed, mu, mask[:,:-1], zz, m0,
-        S0, A, B, Q, C, D, R)
+        seed, mu, mask, zz, m0,
+        S0, A, B, Q, C, D, R,
+        masked_dynamics_params, masked_obs_noise_diag)
     return v
 
 
