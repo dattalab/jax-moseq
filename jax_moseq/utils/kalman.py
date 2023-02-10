@@ -21,9 +21,9 @@ def kalman_sample(seed, ys, mask, zs, m0, S0, A, B, Q, C, D, Rs,
     Parameters
     ----------
     seed: jr.PRNGKey.
-    ys: jax.Array with shape (n_timesteps-n_lags+1, obs_dim)
+    ys: jax.Array with shape (T, obs_dim)
         Continuous observations, minus first L+1 frames.
-    mask: jax.Array with shape (n_timesteps-n_lags+1,)
+    mask: jax.Array with shape (T,)
         Indicator of observation validity, for timesteps [L-1, T)
     zs: jax.Array with shape (n_timesteps-n_lags,)
         Discrete state sequence, taking integer values [1, n_states).
@@ -41,7 +41,7 @@ def kalman_sample(seed, ys, mask, zs, m0, S0, A, B, Q, C, D, Rs,
         Observation transform matrix
     D: jax.Array with shape (obs_dim,)
         Observation input matrix
-    Rs: jax.Array with shape (n_timesteps-n_lags+1, obs_dim)
+    Rs: jax.Array with shape (T, obs_dim)
         Observation noise scales (diagonal entries of covariance)
     masked_dynamics_params: dict with key-value pairs
         - weights: jax.Array with shape (ar_dim, ar_dim)
@@ -53,7 +53,7 @@ def kalman_sample(seed, ys, mask, zs, m0, S0, A, B, Q, C, D, Rs,
 
     Returns
     -------
-    xs: jax.Array with shape (n_timesteps-n_lags+1, ar_dim)
+    xs: jax.Array with shape (T, ar_dim)
 
     """
 
