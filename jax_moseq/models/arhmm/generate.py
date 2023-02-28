@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+import numpy as np
 na = jnp.newaxis
 
 from jax_moseq.utils import pad_affine
