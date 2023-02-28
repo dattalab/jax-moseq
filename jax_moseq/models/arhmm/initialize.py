@@ -61,7 +61,7 @@ def init_states(seed, x, mask, params, **kwargs):
     mask : jax array of shape (N, T)
         Binary indicator for valid frames.
     params : dict
-        Values for each model parameter.
+        Values for each model parameter. 
     **kwargs : dict
         Overflow, for convenience.
 
