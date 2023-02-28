@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+from jax.scipy.linalg import cho_factor
 import numpy as np
 na = jnp.newaxis
 
@@ -107,12 +108,56 @@ def generate_next_state(seed, z, xlags, Ab, Q, pi):
 
     # sample the next latent trajectory
     mu = jnp.dot(Ab[z], pad_affine(xlags.flatten()))
-    x =  jr.multivariate_normal(seed, mu, Q[z])
+    x = jr.multivariate_normal(seed, mu, Q[z])
     xlags = jnp.concatenate([xlags[1:], x[na]], axis=0)
 
     # update the seed
     seed = jr.split(seed)[1]
     return z, xlags, seed
+
+def generate_next_state_fast(seed, z, xlags, Ab, L, pi, sigma):
+    """
+    Generate the next states of an ARHMM, using cholesky
+    factors and precomputed gaussian random variables to 
+    speed up sampling.
+
+    Parameters
+    ----------
+    seed : jax.random.PRNGKey
+        Random seed.
+    z : int
+        Current discrete state.
+    xlags : jax array of shape (nlags, latent_dim)
+        ``nlags`` of continuous state trajectory.
+    Ab : jax array of shape (num_states, latent_dim, ar_dim)
+        Autoregressive transforms.
+    L : jax array of shape (num_states, latent_dim, latent_dim)
+        Cholesky factors for autoregressive noise covariances.
+    pi : jax array of shape (num_states, num_states)
+        Transition matrix.
+    sigma: jax array of shape (latent_dim,)
+        Sample from a standard multivariate normal.
+
+    Returns
+    -------
+    z : int
+        Next state.
+    xlags : jax array of shape (nlags, latent_dim)
+        ``nlags`` of the state trajectory after appending
+        the next continuous state.
+    """
+    # sample the next state
+    z = jr.choice(seed, jnp.arange(pi.shape[0]), p=pi[z])
+
+    # sample the next latent trajectory
+    mu = jnp.dot(Ab[z], pad_affine(xlags.flatten()))
+    x = jnp.dot(L[z], sigma)
+    xlags = jnp.concatenate([xlags[1:], x[na]], axis=0)
+
+    # update the seed
+    seed = jr.split(seed)[1]
+    return z, xlags, seed
+
 
 
 def generate_states(seed, pi, Ab, Q, n_steps, init_state=None):
@@ -144,15 +189,19 @@ def generate_states(seed, pi, Ab, Q, n_steps, init_state=None):
     # initialize the states
     if init_state is None:
         z, xlags, seed = generate_initial_state(seed, pi, Ab, Q)
-    else:
+    else: 
         z, xlags = init_state
-
+        
+    # precompute cholesky factors and random samples
+    L = cho_factor(Q, lower=True)[0]
+    sigmas = jr.normal(seed, (n_steps, Q.shape[-1]))
+    
     # generate the states using jax.lax.scan
-    def _generate_next_state(carry, i):
+    def _generate_next_state(carry, sigma):
         z, xlags, seed = carry
-        z, xlags, seed = generate_next_state(seed, z, xlags, Ab, Q, pi)
+        z, xlags, seed = generate_next_state_fast(seed, z, xlags, Ab, L, pi, sigma)
         return (z, xlags, seed), (z, xlags)
     carry = (z, xlags, seed)
-    _, (zs, xs) = jax.lax.scan(_generate_next_state, carry, jnp.arange(n_steps))
+    _, (zs, xs) = jax.lax.scan(_generate_next_state, carry, sigmas)
 
     return zs, xs[:,-1]
