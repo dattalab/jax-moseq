@@ -151,7 +151,7 @@ def generate_next_state_fast(seed, z, xlags, Ab, L, pi, sigma):
 
     # sample the next latent trajectory
     mu = jnp.dot(Ab[z], pad_affine(xlags.flatten()))
-    x = jnp.dot(L[z], sigma)
+    x = mu + jnp.dot(L[z], sigma)
     xlags = jnp.concatenate([xlags[1:], x[na]], axis=0)
 
     # update the seed
