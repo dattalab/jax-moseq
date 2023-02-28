@@ -2,6 +2,7 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 na = jnp.newaxis
+
 from jax_moseq.utils import pad_affine
 
 def steady_state_distribution(pi, pseudocount=1e-3):
@@ -31,7 +32,7 @@ def steady_state_distribution(pi, pseudocount=1e-3):
     return jnp.array(steady_state)
 
 
-def generate_initial_state(seed, pi, Ab, Q, **kwargs):
+def generate_initial_state(seed, pi, Ab, Q):
     """
     Generate initial states for the ARHMM.
 
@@ -61,7 +62,7 @@ def generate_initial_state(seed, pi, Ab, Q, **kwargs):
     """
     # sample initial discrete state
     pi0 = steady_state_distribution(pi)
-    z0 = jr.choice(seed, jnp.arange(pi0.shape[0]), p=pi0)
+    z = jr.choice(seed, jnp.arange(pi0.shape[0]), p=pi0)
 
     # sample initial latent trajectory
     latent_dim = Ab.shape[1]
@@ -73,7 +74,7 @@ def generate_initial_state(seed, pi, Ab, Q, **kwargs):
     return z, xlags, seed
 
 
-def generate_next_state(seed, z, x, Ab, Q, pi, **kwargs):
+def generate_next_state(seed, z, xlags, Ab, Q, pi):
     """
     Generate the next states of an ARHMM.
 
@@ -104,9 +105,9 @@ def generate_next_state(seed, z, x, Ab, Q, pi, **kwargs):
     z = jr.choice(seed, jnp.arange(pi.shape[0]), p=pi[z])
 
     # sample the next latent trajectory
-    mu = jnp.dot(Ab[z], pad_affine(xlags))
+    mu = jnp.dot(Ab[z], pad_affine(xlags.flatten()))
     x =  jr.multivariate_normal(seed, mu, Q[z])
-    xlags = jnp.concatenate([xlags[:-1], x])
+    xlags = jnp.concatenate([xlags[1:], x[na]], axis=0)
 
     # update the seed
     seed = jr.split(seed)[1]
@@ -140,7 +141,7 @@ def generate_states(seed, pi, Ab, Q, n_steps, init_state=None):
         Continuous states.
     """
     # initialize the states
-    if init_state is None
+    if init_state is None:
         z, xlags, seed = generate_initial_state(seed, pi, Ab, Q)
     else:
         z, xlags = init_state
@@ -153,5 +154,4 @@ def generate_states(seed, pi, Ab, Q, n_steps, init_state=None):
     carry = (z, xlags, seed)
     _, (zs, xs) = jax.lax.scan(_generate_next_state, carry, jnp.arange(n_steps))
 
-    return zs, xs
-
+    return zs, xs[:,-1]
