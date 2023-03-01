@@ -21,7 +21,7 @@ def ar_log_likelihood(x, params):
     nlags = get_nlags(Ab)
     mu = apply_ar_params(x, Ab)
     x = x[..., nlags:, :]
-    return tfd.MultivariateNormalFullCovariance(mu, Q).log_prob(x)
+    return tfd.MultivariateNormalFullCovariance(mu.astype(x.dtype), Q.astype(x.dtype)).log_prob(x)
 
 
 def get_lags(x, nlags):
