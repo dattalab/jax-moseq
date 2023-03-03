@@ -1,11 +1,9 @@
 import jax
 import jax.numpy as jnp
-import jax.random as jr
 
 import tensorflow_probability.substrates.jax.distributions as tfd
 
 from jax_moseq.utils import apply_affine
-from jax_moseq.utils.distributions import sample_mniw
 
 na = jnp.newaxis
 
@@ -16,12 +14,33 @@ def apply_ar_params(x, Ab):
     return apply_affine(x_in, Ab)
 
 
+def apply_ar_params_conv(x, Ab):
+    """
+    Apply AR parameters to a batch of time series data
+
+    Parameters
+    ----------
+    x: jax array, shape (b, t, d)
+        Where b is the batch size
+
+    Ab: jax array, shape (d, d*nlags + 1)
+    """
+    nlags = get_nlags(Ab)
+    b = Ab[:, -1:]
+    A = Ab[:, :-1].T.reshape((nlags, Ab.shape[0], Ab.shape[0]))
+    dn = jax.lax.conv_dimension_numbers(x.shape, A.shape, ('NWC', 'WIO', 'NWC'))
+    x_in = jax.lax.conv_general_dilated(x, A, (1, ), 'VALID', (1, ), (1, ), dn, precision=jax.lax.Precision.HIGHEST) + b.T
+    return x_in[:, :-1]
+
+
 def ar_log_likelihood(x, params):
     Ab, Q = params
     nlags = get_nlags(Ab)
-    mu = apply_ar_params(x, Ab)
-    x = x[..., nlags:, :]
-    return tfd.MultivariateNormalFullCovariance(mu, Q).log_prob(x)
+    if Ab.ndim == 2:
+        mu = apply_ar_params_conv(x, Ab)
+    else:
+        mu = apply_ar_params(x, Ab)
+    return tfd.MultivariateNormalFullCovariance(mu, Q).log_prob(x[..., nlags:, :])
 
 
 def get_lags(x, nlags):

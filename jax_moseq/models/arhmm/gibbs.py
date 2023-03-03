@@ -47,12 +47,11 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, **kwargs):
         Discrete state sequences.
     """
     nlags = get_nlags(Ab)
+    num_samples = mask.shape[0]
 
     # TODO Why not use jax.vmap here? Can specify out_axes=-1 to remove
     # jnp.moveaxis call below
     log_likelihoods = jax.lax.map(partial(ar_log_likelihood, x), (Ab, Q))
-
-    num_samples = mask.shape[0]
     _, z = jax.vmap(sample_hmm_stateseq, in_axes=(0,na,0,0))(
         jr.split(seed, num_samples),
         pi,
@@ -104,15 +103,15 @@ def resample_ar_params(seed, *, nlags, num_states, mask, x, z,
     masks = mask[..., nlags:].reshape(1,-1) * jnp.eye(num_states)[:, z.reshape(-1)]
     x_in = pad_affine(get_lags(x, nlags)).reshape(-1, nlags * x.shape[-1] + 1)
     x_out = x[..., nlags:, :].reshape(-1, x.shape[-1])
-    
-    in_axes = (0,0,na,na,na,na,na,na)
-    Ab, Q = jax.vmap(_resample_regression_params, in_axes)(
-        seed, masks, x_in, x_out, nu_0, S_0, M_0, K_0)
+
+    map_fun = partial(_resample_regression_params, x_in=x_in, x_out=x_out, nu_0=nu_0, S_0=S_0, M_0=M_0, K_0=K_0)
+    Ab, Q = jax.lax.map(map_fun, (seed, masks))
+
     return Ab, Q
 
 
 @jax.jit
-def _resample_regression_params(seed, mask, x_in, x_out,
+def _resample_regression_params(args, *, x_in, x_out,
                                 nu_0, S_0, M_0, K_0):
     """
     Resamples regression parameters from a Matrix normal
@@ -144,6 +143,7 @@ def _resample_regression_params(seed, mask, x_in, x_out,
     Q : jax array of shape (num_states, out_dim, out_dim)
         Regression noise covariances.
     """
+    seed, mask = args
     S_out_out = jnp.einsum('ti,tj,t->ij', x_out, x_out, mask)
     S_out_in = jnp.einsum('ti,tj,t->ij', x_out, x_in, mask)
     S_in_in = jnp.einsum('ti,tj,t->ij', x_in, x_in, mask)
