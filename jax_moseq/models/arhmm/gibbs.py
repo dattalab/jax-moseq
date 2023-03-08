@@ -96,14 +96,14 @@ def resample_ar_params(seed, *, nlags, num_states, mask, x, z,
     Q : jax array of shape (num_states, latent_dim, latent_dim)
         Autoregressive noise covariances.
     """
-    seed = jr.split(seed, num_states)
+    seeds = jr.split(seed, num_states)
 
     masks = mask[..., nlags:].reshape(1,-1) * jnp.eye(num_states)[:, z.reshape(-1)]
     x_in = pad_affine(get_lags(x, nlags)).reshape(-1, nlags * x.shape[-1] + 1)
     x_out = x[..., nlags:, :].reshape(-1, x.shape[-1])
     
     map_fun = partial(_resample_regression_params, x_in, x_out, nu_0, S_0, M_0, K_0)
-    Ab, Q = jax.lax.map(map_fun, (seed, masks))
+    Ab, Q = jax.lax.map(map_fun, (seeds, masks))
     return Ab, Q
 
 
@@ -138,6 +138,8 @@ def _resample_regression_params(x_in, x_out, nu_0, S_0, M_0, K_0, args):
     Q : jax array of shape (num_states, out_dim, out_dim)
         Regression noise covariances.
     """
+    seed, mask = args
+
     S_out_out = jnp.einsum('ti,tj,t->ij', x_out, x_out, mask)
     S_out_in = jnp.einsum('ti,tj,t->ij', x_out, x_in, mask)
     S_in_in = jnp.einsum('ti,tj,t->ij', x_in, x_in, mask)
