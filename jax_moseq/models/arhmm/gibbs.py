@@ -47,12 +47,9 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, **kwargs):
         Discrete state sequences.
     """
     nlags = get_nlags(Ab)
-
-    # TODO Why not use jax.vmap here? Can specify out_axes=-1 to remove
-    # jnp.moveaxis call below
-    log_likelihoods = jax.lax.map(partial(ar_log_likelihood, x), (Ab, Q))
-
     num_samples = mask.shape[0]
+
+    log_likelihoods = jax.lax.map(partial(ar_log_likelihood, x), (Ab, Q))
     _, z = jax.vmap(sample_hmm_stateseq, in_axes=(0,na,0,0))(
         jr.split(seed, num_samples),
         pi,
@@ -100,30 +97,24 @@ def resample_ar_params(seed, *, nlags, num_states, mask, x, z,
         Autoregressive noise covariances.
     """
     seed = jr.split(seed, num_states)
-    
+
     masks = mask[..., nlags:].reshape(1,-1) * jnp.eye(num_states)[:, z.reshape(-1)]
     x_in = pad_affine(get_lags(x, nlags)).reshape(-1, nlags * x.shape[-1] + 1)
     x_out = x[..., nlags:, :].reshape(-1, x.shape[-1])
     
-    in_axes = (0,0,na,na,na,na,na,na)
-    Ab, Q = jax.vmap(_resample_regression_params, in_axes)(
-        seed, masks, x_in, x_out, nu_0, S_0, M_0, K_0)
+    map_fun = partial(_resample_regression_params, x_in, x_out, nu_0, S_0, M_0, K_0)
+    Ab, Q = jax.lax.map(map_fun, (seed, masks))
     return Ab, Q
 
 
 @jax.jit
-def _resample_regression_params(seed, mask, x_in, x_out,
-                                nu_0, S_0, M_0, K_0):
+def _resample_regression_params(x_in, x_out, nu_0, S_0, M_0, K_0, args):
     """
     Resamples regression parameters from a Matrix normal
     inverse-Wishart distribution.
 
     Parameters
     ----------
-    seed : jr.PRNGKey
-        JAX random seed.
-    mask : jax array
-        Binary indicator for valid frames.
     x_in : jax array of shape (..., in_dim)
         Regression input.
     x_out : jax array of shape (..., out_dim)
@@ -136,6 +127,9 @@ def _resample_regression_params(seed, mask, x_in, x_out,
         Matrix normal expectation for Ab.
     K_0 : jax array of shape (in_dim, in_dim)
         Matrix normal column scale parameter for Ab.
+    args: tuple (seed, mask)
+        JAX random seed and binary indicator for frames
+        to use for calculating the sufficient statistics.
 
     Returns
     ------
