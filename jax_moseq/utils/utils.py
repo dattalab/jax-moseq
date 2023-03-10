@@ -3,6 +3,34 @@ import jax
 import jax.numpy as jnp
 from jax.tree_util import tree_map
 from sklearn.decomposition import PCA
+from jax.scipy.linalg import cho_factor, cho_solve
+
+
+def psd_solve(A, B, diagonal_boost=1e-6):
+    """
+    Solves the linear system Ax=B, assuming A is positive semi-definite. 
+    
+    Uses Cholesky decomposition for improved numerical stability and 
+    efficiency. A is symmetrized and diagonal elements are boosted by
+    ``diagonal_boost`` to ensure positive definiteness.
+    
+    Parameters
+    ----------
+    A: jax array, shape (n,n)
+        A positive semi-definite matrix
+    b: jax array, shape (...,n)
+
+    Returns
+    -------
+    x: jax array, shape (...,n)
+        Solution of the linear system Ax=b
+    """
+    A = (A + A.swapaxes(-1, -2)) / 2
+    A = A + diagonal_boost * jnp.eye(A.shape[-1])
+
+    L, lower = cho_factor(A, lower=True)
+    x = cho_solve((L, lower), b)
+    return x
 
 
 def jax_io(fn): 
