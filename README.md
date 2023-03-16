@@ -19,7 +19,7 @@ conda activate jax_moseq
 pip install "jax[cpu]"
 
 # MacOS and Linux users (GPU)
-pip install "jax[cuda]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+pip install "jax[cuda11_cudnn82]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 
 # Windows users (CPU)
 pip install jax https://whls.blob.core.windows.net/unstable/cpu/jaxlib-0.3.22-cp39-cp39-win_amd64.whl
