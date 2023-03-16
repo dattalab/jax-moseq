@@ -24,5 +24,6 @@ setuptools.setup(
         'dynamax',
         'tqdm'
     ], 
-    url='https://github.com/dattalab/jax-moseq'
+    url='https://github.com/dattalab/jax-moseq/tree/0.0.0',
+    download_url='https://github.com/dattalab/jax-moseq/archive/refs/tags/0.0.0.tar.gz'
 )
