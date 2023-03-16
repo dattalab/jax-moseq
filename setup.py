@@ -16,13 +16,10 @@ setuptools.setup(
     ],
     python_requires='>=3.7',
     install_requires=[
-        'tfp-nightly[jax]',
         'numba',
-        'jax',
-        'numpy',
-        'scikit-learn',
         'dynamax',
-        'tqdm'
+        'chex==0.1.6', 
+        'tqdm',
     ], 
     url='https://github.com/dattalab/jax-moseq/tree/0.0.0',
     download_url='https://github.com/dattalab/jax-moseq/archive/refs/tags/0.0.0.tar.gz'
