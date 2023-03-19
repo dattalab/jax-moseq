@@ -31,7 +31,7 @@ def psd_solve(A, B, diagonal_boost=1e-6):
     A = A + diagonal_boost * jnp.eye(A.shape[-1])
 
     L, lower = cho_factor(A, lower=True)
-    x = cho_solve((L, lower), b)
+    x = cho_solve((L, lower), B)
     return x
 
 
