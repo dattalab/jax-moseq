@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import jax.random as jr
 
 from jax_moseq import utils
-from jax_moseq.utils import jax_io, device_put_as_scalar
+from jax_moseq.utils import jax_io, device_put_as_scalar, check_precision
 
 from jax_moseq.models import arhmm, slds
 from jax_moseq.models.keypoint_slds.gibbs import resample_scales
@@ -315,14 +315,16 @@ def estimate_error(conf, slope, intercept):
     return 10 ** (2 * (jnp.log10(conf + 1e-6) * slope + intercept))
 
 
+@check_precision
 def _check_init_args(data, states, params, hypparams,
                      trans_hypparams, ar_hypparams,
                      obs_hypparams, cen_hypparams,
                      has_conf, noise_prior, error_estimator,
                      anterior_idxs, posterior_idxs):
     """
-    Helper method for :py:func:`jax_moseq.models.initialize.init_model` that ensures a sufficient subset
-    of the initialization arguments have been provided by the caller.
+    Helper method for :py:func:`jax_moseq.models.initialize.init_model` 
+    that ensures a sufficient subset of the initialization arguments have 
+    been provided by the caller.
     
     Parameters
     ----------
