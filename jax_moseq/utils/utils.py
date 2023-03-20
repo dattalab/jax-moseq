@@ -206,11 +206,10 @@ def check_precision(fn):
     precision of the jax configuration.
     """
     arg_names = inspect.getfullargspec(fn).args
-    x64 = jax.config.x64_enabled
-    
+   
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
-        
+        x64 = jax.config.x64_enabled
         args_with_wrong_precision = []
         for name,arg in list(zip(arg_names,args)) + list(kwargs.items()):
             check_fn = functools.partial(_check_array_precision, x64=x64)
