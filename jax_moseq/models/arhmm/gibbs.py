@@ -15,7 +15,6 @@ from jax_moseq.utils.autoregression import (
 from jax_moseq.utils.transitions import resample_hdp_transitions
 
 from functools import partial
-
 na = jnp.newaxis
 
 
@@ -52,7 +51,7 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, **kwargs):
     log_likelihoods = jax.lax.map(partial(ar_log_likelihood, x), (Ab, Q))
     _, z = jax.vmap(sample_hmm_stateseq, in_axes=(0,na,0,0))(
         jr.split(seed, num_samples),
-        pi + 1e-16, # prevent numerical instability
+        pi,
         jnp.moveaxis(log_likelihoods,0,-1),
         mask.astype(float)[:,nlags:])
     return z
