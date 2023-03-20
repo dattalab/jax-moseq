@@ -52,7 +52,7 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, **kwargs):
     log_likelihoods = jax.lax.map(partial(ar_log_likelihood, x), (Ab, Q))
     _, z = jax.vmap(sample_hmm_stateseq, in_axes=(0,na,0,0))(
         jr.split(seed, num_samples),
-        pi,
+        pi + 1e-16, # prevent numerical instability
         jnp.moveaxis(log_likelihoods,0,-1),
         mask.astype(float)[:,nlags:])
     return z
