@@ -18,6 +18,37 @@ from functools import partial
 na = jnp.newaxis
 
 
+##########################################
+def resample_precision(seed, x, z, Ab, Q, nu):
+    """
+    Resample the precision ``tau`` on each frame.
+    """
+    # compute residual: will be array with same shape as z
+    # compute tau: will be array with same shape as z
+    # need to use z to index Ab, Q, nu
+
+    '''
+    residual_vector = x - apply_ar_params(x, Ab[z])
+    residual_scalar = some_function_of(residual_vector, Q)
+    tau = sample_from_some_distribution(residual_scalar, nu, x.shape[-1])
+    '''
+    pass
+
+def resample_robust_ar_params(args):
+    """
+    similar to resample_ar_params, but need to rescale by tau
+    when computing sufficient stats. This means you need to
+    modify _resample_regression_params, where the following
+    lines are now rescaled by tau:
+
+    S_out_out = jnp.einsum('ti,tj,t->ij', x_out, x_out, mask)
+    S_out_in = jnp.einsum('ti,tj,t->ij', x_out, x_in, mask)
+    S_in_in = jnp.einsum('ti,tj,t->ij', x_in, x_in, mask)
+    """
+
+
+##########################################
+
 @jax.jit
 def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, **kwargs):
     """
