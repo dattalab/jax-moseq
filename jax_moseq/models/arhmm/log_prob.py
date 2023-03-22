@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 
-from jax_moseq.utils.autoregression import get_nlags, ar_log_likelihood
+from jax_moseq.utils.autoregression import get_nlags, ar_log_likelihood, robust_ar_log_likelihood
 
 
 def discrete_stateseq_log_prob(z, pi, **kwargs):
@@ -27,7 +27,7 @@ def discrete_stateseq_log_prob(z, pi, **kwargs):
 
 
 # TODO: add computation of robust regression log likelihood
-def continuous_stateseq_log_prob(x, z, Ab, Q, **kwargs):
+def continuous_stateseq_log_prob(x, z, Ab, Q, nu, robust **kwargs):
     """
     Calculate the log probability of the trajectory ``x`` at each time 
     step, given switching autoregressive (AR) parameters
@@ -50,11 +50,13 @@ def continuous_stateseq_log_prob(x, z, Ab, Q, **kwargs):
     log_px : jax array of shape (..., T - n_lags)
         Log probability of ``x``.
     """
+    if robust:
+        return robust_ar_log_likelihood(x, (Ab[z], Q[z], nu[z]))
     return ar_log_likelihood(x, (Ab[z], Q[z]))
 
 
 @jax.jit
-def log_joint_likelihood(x, mask, z, pi, Ab, Q, **kwargs):
+def log_joint_likelihood(x, mask, z, pi, Ab, Q, nu=None, robust=False, **kwargs):
     """
     Calculate the total log probability for each latent state
 
@@ -84,7 +86,7 @@ def log_joint_likelihood(x, mask, z, pi, Ab, Q, **kwargs):
     ll = {}
     
     log_pz = discrete_stateseq_log_prob(z, pi)
-    log_px = continuous_stateseq_log_prob(x, z, Ab, Q)
+    log_px = continuous_stateseq_log_prob(x, z, Ab, Q, nu, robust)
     
     nlags = get_nlags(Ab)
     ll['z'] = (log_pz * mask[..., nlags + 1:]).sum()

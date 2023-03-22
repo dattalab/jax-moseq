@@ -46,7 +46,8 @@ def resample_precision(seed, x, z, Ab, Q, nu, **kwargs):
     residual_scalar = some_function_of(residual_vector, Q)
     tau = sample_from_some_distribution(residual_scalar, nu, x.shape[-1])
     '''
-    residuals = x - apply_ar_params(x, Ab[z])
+    nlags = get_nlags(Ab)
+    residuals = x[..., nlags:, :] - apply_ar_params(x, Ab[z])
     # compute the inverse of the covariance matrix Q for each state
     # TODO: test this calculation to make sure it's correct
     Q_inv = jax.vmap(partial(psd_solve, B=jnp.eye(Q.shape[-1])), in_axes=(0, None))(Q)
@@ -62,11 +63,11 @@ def resample_precision(seed, x, z, Ab, Q, nu, **kwargs):
 
 
 @jax.jit
-def resample_nu(seed, mask, z, tau, nu, num_states, N_steps=100, prop_std=0.1, alpha=1, beta=1, **kwargs):
+def resample_nu(seed, mask, z, tau, nu, num_states, nlags, N_steps=100, prop_std=0.1, alpha=1, beta=1, **kwargs):
     """
     Resample the degrees of freedom ``nu`` for each state.
     """
-    masks = mask.reshape(1, -1) * jnp.eye(num_states)[:, z.reshape(-1)]
+    masks = mask[..., nlags:].reshape(1, -1) * jnp.eye(num_states)[:, z.reshape(-1)]
     N = masks.sum(axis=0)
     E_tau = (masks * tau.reshape(1, -1)).sum(axis=0) / jnp.clip(N, 1, None)
     E_logtau = (masks * jnp.log(tau).reshape(1, -1)).sum(axis=0) / jnp.clip(N, 1, None)
