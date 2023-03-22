@@ -270,14 +270,12 @@ def resample_model(data, seed, states, params, hypparams,
         
         if robust:
             params['tau'] = resample_precision(seed, **data, **states, **params, **hypparams['ar_hypparams'])
+            params['nu'] = resample_nu(seed, **data, **states, **params, **hypparams['ar_hypparams'])
 
         params['Ab'], params['Q']= resample_ar_params(
             seed, **data, **states, **params, 
             **hypparams['ar_hypparams'])
         
-        if robust:
-            params['nu'] = resample_nu()
-
     states['z'] = resample_discrete_stateseqs(
         seed, **data, **states, **params)
 
