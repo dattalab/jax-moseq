@@ -20,9 +20,20 @@ na = jnp.newaxis
 
 
 ##########################################
-def resample_precision(seed, x, z, Ab, Q, nu):
+def resample_precision(seed, x, z, Ab, Q, nu, **kwargs):
     """
     Resample the precision ``tau`` on each frame.
+
+    Args:
+        seed: jax random seed
+        x: jax array, shape (N, T, latent_dim)
+        z: jax array, shape (N, T)
+        Ab: jax array, shape (num_states, latent_dim, ar_dim)
+        Q: jax array, shape (num_states, latent_dim, latent_dim)
+        nu: jax array, shape (num_states,)
+
+    Returns:
+        tau: jax array, shape (N, T)
     """
     # compute residual: will be array with same shape as z
     # compute tau: will be array with same shape as z
@@ -34,32 +45,18 @@ def resample_precision(seed, x, z, Ab, Q, nu):
     tau = sample_from_some_distribution(residual_scalar, nu, x.shape[-1])
     '''
     residuals = x - apply_ar_params(x, Ab[z])
-    # compute the inverse of the covariance matrix Q
-    # TODO: handle this calculation for all syllables in parallel
+    # compute the inverse of the covariance matrix Q for each state
+    # TODO: test this calculation to make sure it's correct
     Q_inv = jax.vmap(partial(psd_solve, B=jnp.eye(Q.shape[-1])), in_axes=(0, None))(Q)
-    scaled_Q_inv = Q_inv[z] @ residuals.T
+    scaled_Q_inv = (Q_inv[z] @ residuals.T).T
 
     # compute gamma distribution parameters
-    a_post = nu / 2 + x.shape[-1] / 2
-    b_post = nu / 2 + (residuals * scaled_Q_inv).sum(axis=-1) / 2
+    a_post = nu[z] / 2 + x.shape[-1] / 2
+    b_post = nu[z] / 2 + (residuals * scaled_Q_inv).sum(axis=-1) / 2
 
     tau = jr.gamma(seed, a_post, 1 / b_post)
 
     return tau
-
-def resample_robust_ar_params(args):
-    """
-    similar to resample_ar_params, but need to rescale by tau
-    when computing sufficient stats. This means you need to
-    modify _resample_regression_params, where the following
-    lines are now rescaled by tau:
-
-    S_out_out = jnp.einsum('ti,tj,t->ij', x_out, x_out, mask)
-    S_out_in = jnp.einsum('ti,tj,t->ij', x_out, x_in, mask)
-    S_in_in = jnp.einsum('ti,tj,t->ij', x_in, x_in, mask)
-    """
-    pass
-
 
 ##########################################
 
@@ -104,7 +101,7 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, **kwargs):
 
 @partial(jax.jit, static_argnames=('num_states','nlags'))
 def resample_ar_params(seed, *, nlags, num_states, mask, x, z,
-                       nu_0, S_0, M_0, K_0, **kwargs):
+                       nu_0, S_0, M_0, K_0, tau=1, **kwargs):
     """
     Resamples the AR parameters ``Ab`` and ``Q``.
 
@@ -143,7 +140,7 @@ def resample_ar_params(seed, *, nlags, num_states, mask, x, z,
     seeds = jr.split(seed, num_states)
 
     masks = mask[..., nlags:].reshape(1,-1) * jnp.eye(num_states)[:, z.reshape(-1)]
-    x_in = pad_affine(get_lags(x, nlags)).reshape(-1, nlags * x.shape[-1] + 1)
+    x_in = pad_affine(get_lags(x * tau, nlags)).reshape(-1, nlags * x.shape[-1] + 1)
     x_out = x[..., nlags:, :].reshape(-1, x.shape[-1])
     
     map_fun = partial(_resample_regression_params, x_in, x_out, nu_0, S_0, M_0, K_0)
@@ -199,7 +196,7 @@ def _resample_regression_params(x_in, x_out, nu_0, S_0, M_0, K_0, args):
 
 
 def resample_model(data, seed, states, params, hypparams,
-                   states_only=False, **kwargs):
+                   states_only=False, robust=False, **kwargs):
     """
     Resamples the ARHMM model given the hyperparameters, data,
     current states, and current parameters.
@@ -233,10 +230,16 @@ def resample_model(data, seed, states, params, hypparams,
         params['betas'], params['pi'] = resample_hdp_transitions(
             seed, **data, **states, **params, 
             **hypparams['trans_hypparams'])
+        
+        if robust:
+            params['tau'] = resample_precision(seed, **data, **states, **params, **hypparams['ar_hypparams'])
 
         params['Ab'], params['Q']= resample_ar_params(
             seed, **data, **states, **params, 
             **hypparams['ar_hypparams'])
+        
+        if robust:
+            params['nu'] = resample_nu()
 
     states['z'] = resample_discrete_stateseqs(
         seed, **data, **states, **params)
