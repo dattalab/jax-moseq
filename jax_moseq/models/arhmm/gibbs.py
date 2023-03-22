@@ -61,6 +61,7 @@ def resample_precision(seed, x, z, Ab, Q, nu, **kwargs):
     return tau
 
 
+@jax.jit
 def resample_nu(seed, mask, z, tau, nu, num_states, N_steps=100, prop_std=0.1, alpha=1, beta=1, **kwargs):
     """
     Resample the degrees of freedom ``nu`` for each state.

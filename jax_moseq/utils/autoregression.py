@@ -5,7 +5,6 @@ import jax.random as jr
 import tensorflow_probability.substrates.jax.distributions as tfd
 
 from jax_moseq.utils import apply_affine
-from jax_moseq.utils.distributions import sample_mniw
 
 na = jnp.newaxis
 
@@ -14,6 +13,9 @@ def apply_ar_params(x, Ab):
     nlags = get_nlags(Ab)
     x_in = get_lags(x, nlags)
     return apply_affine(x_in, Ab)
+
+
+# TODO: add robust log likelihood
 
 
 def ar_log_likelihood(x, params):

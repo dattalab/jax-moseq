@@ -26,6 +26,7 @@ def discrete_stateseq_log_prob(z, pi, **kwargs):
     return jnp.log(pi[z[...,:-1],z[...,1:]])
 
 
+# TODO: add computation of robust regression log likelihood
 def continuous_stateseq_log_prob(x, z, Ab, Q, **kwargs):
     """
     Calculate the log probability of the trajectory ``x`` at each time 
