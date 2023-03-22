@@ -79,7 +79,7 @@ def resample_nu(seed, mask, z, tau, nu, num_states, N_steps=100, prop_std=0.1, a
 
 
 def _sample_nu(nu, nu_prop, thresh, E_tau, E_logtau, N, alpha, beta):
-    lprior = lambda nu: (alpha - 1) * jnp.log(nu) - alpha * nu
+    lprior = lambda nu: (alpha - 1) * jnp.log(nu) - beta * nu
     ll = lambda nu: N * ((nu / 2) * jnp.log(nu / 2) - gammaln(nu / 2) + (nu / 2 - 1) * E_logtau - nu / 2 * E_tau)
     lp = lambda nu: lprior(nu) + ll(nu)
 
