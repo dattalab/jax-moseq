@@ -74,7 +74,27 @@ def init_states(seed, x, mask, params, **kwargs):
     return {'z': z}
 
 
-def init_params(seed, trans_hypparams, ar_hypparams, **kwargs):
+def init_nu(num_states, **kwargs):
+    """
+    Initialize the degrees of freedom parameter of the
+    autoregression noise using a multivariate-t distribution.
+    
+    Parameters
+    ----------
+    num_states : int
+        Max number of HMM states.
+    **kwargs : dict
+        Overflow, for convenience.
+
+    Returns
+    -------
+    nu : jax array of shape (num_states,)
+        Degrees of freedom.
+    """
+    return jnp.ones(num_states) * 4
+
+
+def init_params(seed, trans_hypparams, ar_hypparams, robust=False, **kwargs):
     """
     Initialize the parameters of the ARHMM from the
     data and hyperparameters.
@@ -98,6 +118,8 @@ def init_params(seed, trans_hypparams, ar_hypparams, **kwargs):
     params = {}
     params['betas'], params['pi'] = init_hdp_transitions(seed, **trans_hypparams)
     params['Ab'], params['Q'] = init_ar_params(seed, **ar_hypparams)
+    if robust:
+        params['nu'] = init_nu(**ar_hypparams)
     return params
 
 
@@ -146,6 +168,7 @@ def init_model(data=None,
                
                trans_hypparams=None,
                ar_hypparams=None,
+               robust=False,
                
                verbose=False,
                **kwargs):
@@ -213,7 +236,7 @@ def init_model(data=None,
     if params is None:
         if verbose:
             print('ARHMM: Initializing parameters')
-        params = init_params(seed, **hypparams)
+        params = init_params(seed, robust=robust, **hypparams)
     else:
         params = jax.device_put(params)
     model['params'] = params
