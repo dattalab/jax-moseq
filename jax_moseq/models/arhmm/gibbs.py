@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+from jax.scipy.special import gammaln
 
 from jax_moseq.utils import pad_affine, psd_solve
 from jax_moseq.utils.distributions import (
@@ -20,6 +21,7 @@ na = jnp.newaxis
 
 
 ##########################################
+@jax.jit
 def resample_precision(seed, x, z, Ab, Q, nu, **kwargs):
     """
     Resample the precision ``tau`` on each frame.
@@ -57,6 +59,39 @@ def resample_precision(seed, x, z, Ab, Q, nu, **kwargs):
     tau = jr.gamma(seed, a_post, 1 / b_post)
 
     return tau
+
+
+def resample_nu(seed, mask, z, tau, nu, num_states, N_steps=100, prop_std=0.1, alpha=1, beta=1, **kwargs):
+    """
+    Resample the degrees of freedom ``nu`` for each state.
+    """
+    masks = mask.reshape(1, -1) * jnp.eye(num_states)[:, z.reshape(-1)]
+    N = masks.sum(axis=0)
+    E_tau = (masks * tau.reshape(1, -1)).sum(axis=0) / jnp.clip(N, 1, None)
+    E_logtau = (masks * jnp.log(tau).reshape(1, -1)).sum(axis=0) / jnp.clip(N, 1, None)
+
+    # sample from uniform distribution
+    nu_prop = jr.normal(seed, (num_states, N_steps)) * prop_std + nu[:, na]
+    nu_prop = jax.where(nu_prop < 1e-3, nu[:, na], nu_prop)
+    thresh = jnp.log(jr.uniform(seed, (num_states, N_steps)))
+    nu = jax.vmap(_sample_nu, in_axes=(0, 0, 0, 0, 0, 0, None, None))(nu, nu_prop, thresh, E_tau, E_logtau, N, alpha, beta)
+
+
+def _sample_nu(nu, nu_prop, thresh, E_tau, E_logtau, N, alpha, beta):
+    lprior = lambda nu: (alpha - 1) * jnp.log(nu) - alpha * nu
+    ll = lambda nu: N * ((nu / 2) * jnp.log(nu / 2) - gammaln(nu / 2) + (nu / 2 - 1) * E_logtau - nu / 2 * E_tau)
+    lp = lambda nu: lprior(nu) + ll(nu)
+
+    def _accept_reject(nu, args):
+        nu_prop, thresh = args
+        return jax.lax.cond(
+            thresh < lp(nu_prop) - lp(nu),
+            lambda _: (nu_prop, nu_prop),
+            lambda _: (nu, nu),
+            operand=None
+        )
+    nu_prop, _ = jax.lax.scan(_accept_reject, nu, (nu_prop, thresh))
+    return nu_prop
 
 ##########################################
 
