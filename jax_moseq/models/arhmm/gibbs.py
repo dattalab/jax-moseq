@@ -76,6 +76,7 @@ def resample_nu(seed, mask, z, tau, nu, num_states, N_steps=100, prop_std=0.1, a
     nu_prop = jax.where(nu_prop < 1e-3, nu[:, na], nu_prop)
     thresh = jnp.log(jr.uniform(seed, (num_states, N_steps)))
     nu = jax.vmap(_sample_nu, in_axes=(0, 0, 0, 0, 0, 0, None, None))(nu, nu_prop, thresh, E_tau, E_logtau, N, alpha, beta)
+    return nu
 
 
 def _sample_nu(nu, nu_prop, thresh, E_tau, E_logtau, N, alpha, beta):
