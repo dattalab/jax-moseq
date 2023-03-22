@@ -10,7 +10,8 @@ from jax_moseq.utils.distributions import (
 from jax_moseq.utils.autoregression import (
     get_lags,
     get_nlags,
-    ar_log_likelihood
+    ar_log_likelihood,
+    apply_ar_params
 )
 from jax_moseq.utils.transitions import resample_hdp_transitions
 
@@ -32,7 +33,19 @@ def resample_precision(seed, x, z, Ab, Q, nu):
     residual_scalar = some_function_of(residual_vector, Q)
     tau = sample_from_some_distribution(residual_scalar, nu, x.shape[-1])
     '''
-    pass
+    residuals = x - apply_ar_params(x, Ab[z])
+    # compute the inverse of the covariance matrix Q
+    # TODO: handle this calculation for all syllables in parallel
+    Q_inv = psd_solve(Q[z], jnp.eye(Q.shape[-1]))
+    z = Q_inv @ residuals.T
+
+    # compute gamma distribution parameters
+    a_post = nu / 2 + x.shape[-1] / 2
+    b_post = nu / 2 + (residuals * z).sum(axis=-1) / 2
+
+    tau = jr.gamma(seed, a_post, 1 / b_post)
+
+    return tau
 
 def resample_robust_ar_params(args):
     """
@@ -45,6 +58,7 @@ def resample_robust_ar_params(args):
     S_out_in = jnp.einsum('ti,tj,t->ij', x_out, x_in, mask)
     S_in_in = jnp.einsum('ti,tj,t->ij', x_in, x_in, mask)
     """
+    pass
 
 
 ##########################################
