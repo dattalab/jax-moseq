@@ -19,16 +19,17 @@ def apply_ar_params(x, Ab):
 # TODO: add robust log likelihood
 def robust_ar_log_likelihood(x, params):
     Ab, Q, nu = params
+    D = x.shape[-1]
     nlags = get_nlags(Ab)
     mu = apply_ar_params(x, Ab)
     residuals = x[..., nlags:, :] - mu
     Q_inv = jax.vmap(psd_solve, in_axes=(0, None))(Q, jnp.eye(Q.shape[-1]))
     z = (Q_inv @ residuals.T).T
 
-    out = -0.5 * (nu + x.shape[-1]) * jnp.log(1 + (residuals * z).sum(axis=-1) / nu)
-    out = out + gammaln((nu + x.shape[-1]) / 2) - gammaln(nu / 2) - x.shape[-1] / 2 * jnp.log(nu) - x.shape[-1] / 2 * jnp.log(jnp.pi) - 0.5 * jnp.linalg.slogdet(Q)[1]
+    out = -0.5 * (nu + D) * jnp.log(1 + (residuals * z).sum(axis=-1) / nu)
+    out = out + gammaln((nu + D) / 2) - gammaln(nu / 2) - D / 2 * jnp.log(nu) - D / 2 * jnp.log(jnp.pi) - jnp.log(jnp.diag(jnp.linalg.cholesky(Q))).reshape(len(Q), -1).sum(axis=-1)
 
-    return tfd.MultivariateNormalRobustPrecision(mu, Q, nu).log_prob(x)
+    return out
 
 
 def ar_log_likelihood(x, params):
