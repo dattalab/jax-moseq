@@ -36,12 +36,12 @@ def resample_precision(seed, x, z, Ab, Q, nu):
     residuals = x - apply_ar_params(x, Ab[z])
     # compute the inverse of the covariance matrix Q
     # TODO: handle this calculation for all syllables in parallel
-    Q_inv = psd_solve(Q[z], jnp.eye(Q.shape[-1]))
-    z = Q_inv @ residuals.T
+    Q_inv = jax.vmap(partial(psd_solve, B=jnp.eye(Q.shape[-1])), in_axes=(0, None))(Q)
+    scaled_Q_inv = Q_inv[z] @ residuals.T
 
     # compute gamma distribution parameters
     a_post = nu / 2 + x.shape[-1] / 2
-    b_post = nu / 2 + (residuals * z).sum(axis=-1) / 2
+    b_post = nu / 2 + (residuals * scaled_Q_inv).sum(axis=-1) / 2
 
     tau = jr.gamma(seed, a_post, 1 / b_post)
 
