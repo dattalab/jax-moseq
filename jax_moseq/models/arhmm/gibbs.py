@@ -3,7 +3,8 @@ import jax.numpy as jnp
 import jax.random as jr
 from jax.scipy.special import gammaln
 
-from jax_moseq.utils import pad_affine, psd_solve
+from jax_moseq.utils import pad_affine, psd_solve, psd_inv
+
 from jax_moseq.utils.distributions import (
     sample_mniw,
     sample_hmm_stateseq
@@ -244,10 +245,10 @@ def _resample_regression_params(x_in, x_out, nu_0, S_0, M_0, K_0, args):
     S_in_in = jnp.einsum('ti,tj,t->ij', x_in, x_in, mask)
     print('regression stats', jnp.isnan(S_out_out).sum(), jnp.isnan(S_out_in).sum(), jnp.isnan(S_in_in).sum())
     
-    K_0_inv = psd_solve(K_0, jnp.eye(K_0.shape[-1]))
+    K_0_inv = psd_inv(K_0)
     K_n_inv = K_0_inv + S_in_in
 
-    K_n = psd_solve(K_n_inv, jnp.eye(K_n_inv.shape[-1]))
+    K_n = psd_inv(K_n_inv)
     M_n = psd_solve(K_n_inv.T, K_0_inv @ M_0.T + S_out_in.T).T  
      
     S_n = S_0 + S_out_out + (M_0 @ K_0_inv @ M_0.T - M_n @ K_n_inv @ M_n.T)
