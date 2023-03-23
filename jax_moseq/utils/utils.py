@@ -8,6 +8,11 @@ import inspect
 import functools
 from textwrap import fill
 
+
+def symmetrize(A):
+    """Symmetrize a matrix."""
+    return (A + A.swapaxes(-1, -2)) / 2
+
 def psd_solve(A, B, diagonal_boost=1e-6):
     """
     Solves the linear system Ax=B, assuming A is positive semi-definite. 
@@ -27,12 +32,30 @@ def psd_solve(A, B, diagonal_boost=1e-6):
     x: jax array, shape (...,n)
         Solution of the linear system Ax=b
     """
-    A = (A + A.swapaxes(-1, -2)) / 2
-    A = A + diagonal_boost * jnp.eye(A.shape[-1])
-
+    A = symmetrize(A) + diagonal_boost * jnp.eye(A.shape[-1])
     L, lower = cho_factor(A, lower=True)
     x = cho_solve((L, lower), B)
     return x
+
+def psd_inv(A, diagonal_boost=1e-6):
+    """
+    Invert a positive semi-definite matrix.
+
+    Uses :py:func:`jax_moseq.utils.psd_solve` for numerical stability
+    and ensures that the inverse matrix is symmetric.
+
+    Parameters
+    ----------
+    A: jax array, shape (n,n)
+        A positive semi-definite matrix
+
+    Returns
+    -------
+    Ainv: jax array, shape (n,n)
+        The inverse of A
+    """
+    Ainv = psd_solve(A, jnp.eye(A.shape[-1]), diagonal_boost=diagonal_boost)
+    return symmetrize(Ainv)
 
 
 def jax_io(fn): 
