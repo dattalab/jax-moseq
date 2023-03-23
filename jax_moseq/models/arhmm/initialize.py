@@ -238,6 +238,7 @@ def init_model(data=None,
         if verbose:
             print('ARHMM: Initializing parameters')
         params = init_params(seed, robust=robust, **hypparams)
+        params['tau'] = jnp.ones_like(x)
     else:
         params = jax.device_put(params)
     model['params'] = params

@@ -148,7 +148,7 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, **kwargs):
 
 # @partial(jax.jit, static_argnames=('num_states','nlags'))
 def resample_ar_params(seed, *, nlags, num_states, mask, x, z,
-                       nu_0, S_0, M_0, K_0, tau=1, **kwargs):
+                       nu_0, S_0, M_0, K_0, tau, **kwargs):
     """
     Resamples the AR parameters ``Ab`` and ``Q``.
 
@@ -187,12 +187,11 @@ def resample_ar_params(seed, *, nlags, num_states, mask, x, z,
     seeds = jr.split(seed, num_states)
 
     masks = mask[..., nlags:].reshape(1,-1) * jnp.eye(num_states)[:, z.reshape(-1)]
-    x_in = jax.vmap(jnp.multiply, in_axes=(-1, None))(pad_affine(get_lags(x, nlags)), jnp.sqrt(tau))
-    x_in = jnp.moveaxis(x_in, 0, -1)
-    x_in = x_in.reshape(-1, nlags * x.shape[-1] + 1)
-    x_out = jax.vmap(jnp.multiply, in_axes=(-1, None))(x[..., nlags:, :], jnp.sqrt(tau))
-    x_out = jnp.moveaxis(x_out, 0, -1)
-    x_out = x_out.reshape(-1, x.shape[-1])
+    x_in = pad_affine(get_lags(x, nlags)).reshape(-1, nlags * x.shape[-1] + 1)
+    x_out = x[..., nlags:, :].reshape(-1, x.shape[-1])
+    x_in = x_in * tau.reshape(-1, 1)
+    x_out = x_out * tau.reshape(-1, 1)
+
     print(jnp.isnan(x_in).sum(), jnp.isnan(x_out).sum())
     
     map_fun = partial(_resample_regression_params, x_in, x_out, nu_0, S_0, M_0, K_0)
