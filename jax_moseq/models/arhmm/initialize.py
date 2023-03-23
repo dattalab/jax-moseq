@@ -118,9 +118,9 @@ def init_params(seed, trans_hypparams, ar_hypparams, robust=False, **kwargs):
     params = {}
     params['betas'], params['pi'] = init_hdp_transitions(seed, **trans_hypparams)
     params['Ab'], params['Q'] = init_ar_params(seed, **ar_hypparams)
+    params['robust'] = robust
     if robust:
         params['nu'] = init_nu(**ar_hypparams)
-        params['robust'] = True
     return params
 
 
