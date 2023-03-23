@@ -25,8 +25,11 @@ def sample_chi2(seed, degs):
 
 def sample_mn(seed, M, U, V):
     G = jr.normal(seed,M.shape)
+    print('mn 1', jnp.isnan(G).sum())
     G = jnp.dot(jnp.linalg.cholesky(U),G)
+    print('mn 2', jnp.isnan(G).sum())
     G = jnp.dot(G,jnp.linalg.cholesky(V).T)
+    print('mn 3', jnp.isnan(G).sum())
     return M + G
 
 def sample_invwishart(seed,S,nu):
@@ -34,16 +37,22 @@ def sample_invwishart(seed,S,nu):
     
     chi2_seed, norm_seed = jr.split(seed)
     x = jnp.diag(jnp.sqrt(sample_chi2(chi2_seed, nu - jnp.arange(n))))
+    print('invw 1', jnp.isnan(x).sum())
     x = x.at[jnp.triu_indices_from(x,1)].set(jr.normal(norm_seed, (n*(n-1)//2,)))
+    print('invw 2', jnp.isnan(x).sum())
     R = jnp.linalg.qr(x,'r')
-    
+    print('invw 3', jnp.isnan(R).sum())
+    print('S', S)
     chol = jnp.linalg.cholesky(S)
+    print('invw 4', jnp.isnan(chol).sum())
     
     T = jax.scipy.linalg.solve_triangular(R.T,chol.T,lower=True).T
+    print('invw 5', jnp.isnan(T).sum())
     return jnp.dot(T,T.T)
 
 def sample_mniw(seed, nu, S, M, K):
     sigma = sample_invwishart(seed, S, nu)
+    print(sigma)
     A = sample_mn(seed, M, sigma, K)
     return A, sigma
 

@@ -6,7 +6,6 @@ from sklearn.decomposition import PCA
 from jax.scipy.linalg import cho_factor, cho_solve
 import inspect
 import functools
-from textwrap import fill
 
 def psd_solve(A, B, diagonal_boost=1e-6):
     """
