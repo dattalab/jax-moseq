@@ -22,7 +22,7 @@ na = jnp.newaxis
 
 
 ##########################################
-@jax.jit
+# @jax.jit
 def resample_precision(seed, x, z, Ab, Q, nu, **kwargs):
     """
     Resample the precision ``tau`` on each frame.
@@ -61,7 +61,12 @@ def resample_precision(seed, x, z, Ab, Q, nu, **kwargs):
     # compute gamma distribution parameters
     a_post = nu[z] / 2 + x.shape[-1] / 2
     b_post = nu[z] / 2 + (scaled_residuals * residuals).sum(axis=-1) / 2
+    print('a_post, b_post nans', jnp.isnan(a_post).sum(), jnp.isnan(b_post).sum())
+    print('b_post smaller than 0', (b_post < 0).sum())
+    print('b_post', b_post)
+    print('q', Q)
     tau = tfd.Gamma(a_post, 1 / b_post).sample(seed=seed)
+    print('tau', jnp.isnan(tau).sum())
 
     return tau
 
@@ -141,7 +146,7 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, **kwargs):
     return z
 
 
-@partial(jax.jit, static_argnames=('num_states','nlags'))
+# @partial(jax.jit, static_argnames=('num_states','nlags'))
 def resample_ar_params(seed, *, nlags, num_states, mask, x, z,
                        nu_0, S_0, M_0, K_0, tau=1, **kwargs):
     """
@@ -182,19 +187,25 @@ def resample_ar_params(seed, *, nlags, num_states, mask, x, z,
     seeds = jr.split(seed, num_states)
 
     masks = mask[..., nlags:].reshape(1,-1) * jnp.eye(num_states)[:, z.reshape(-1)]
-    x_in = jax.vmap(jnp.multiply, in_axes=(-1, None))(pad_affine(get_lags(x, nlags)), tau)
+    x_in = jax.vmap(jnp.multiply, in_axes=(-1, None))(pad_affine(get_lags(x, nlags)), jnp.sqrt(tau))
     x_in = jnp.moveaxis(x_in, 0, -1)
     x_in = x_in.reshape(-1, nlags * x.shape[-1] + 1)
-    x_out = jax.vmap(jnp.multiply, in_axes=(-1, None))(x[..., nlags:, :], tau)
+    x_out = jax.vmap(jnp.multiply, in_axes=(-1, None))(x[..., nlags:, :], jnp.sqrt(tau))
     x_out = jnp.moveaxis(x_out, 0, -1)
     x_out = x_out.reshape(-1, x.shape[-1])
+    print(jnp.isnan(x_in).sum(), jnp.isnan(x_out).sum())
     
     map_fun = partial(_resample_regression_params, x_in, x_out, nu_0, S_0, M_0, K_0)
-    Ab, Q = jax.lax.map(map_fun, (seeds, masks))
+    _tmp = [map_fun((seed, mask)) for seed, mask in zip(seeds, masks)]
+    Ab = jnp.array([_t[0] for _t in _tmp])
+    Q = jnp.array([_t[1] for _t in _tmp])
+    print('shape Ab', Ab.shape, 'shape Q', Q.shape)
+    print('Q nans', jnp.isnan(Q).sum(), 'Ab nans', jnp.isnan(Ab).sum())
+    # Ab, Q = jax.lax.map(map_fun, (seeds, masks))
     return Ab, Q
 
 
-@jax.jit
+# @jax.jit
 def _resample_regression_params(x_in, x_out, nu_0, S_0, M_0, K_0, args):
     """
     Resamples regression parameters from a Matrix normal
@@ -230,6 +241,7 @@ def _resample_regression_params(x_in, x_out, nu_0, S_0, M_0, K_0, args):
     S_out_out = jnp.einsum('ti,tj,t->ij', x_out, x_out, mask)
     S_out_in = jnp.einsum('ti,tj,t->ij', x_out, x_in, mask)
     S_in_in = jnp.einsum('ti,tj,t->ij', x_in, x_in, mask)
+    print('regression stats', jnp.isnan(S_out_out).sum(), jnp.isnan(S_out_in).sum(), jnp.isnan(S_in_in).sum())
     
     K_0_inv = psd_solve(K_0, jnp.eye(K_0.shape[-1]))
     K_n_inv = K_0_inv + S_in_in
