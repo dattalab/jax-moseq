@@ -120,6 +120,7 @@ def init_params(seed, trans_hypparams, ar_hypparams, robust=False, **kwargs):
     params['Ab'], params['Q'] = init_ar_params(seed, **ar_hypparams)
     if robust:
         params['nu'] = init_nu(**ar_hypparams)
+        params['robust'] = True
     return params
 
 

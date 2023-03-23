@@ -15,6 +15,7 @@ from jax_moseq.utils.autoregression import (
     apply_ar_params
 )
 from jax_moseq.utils.transitions import resample_hdp_transitions
+import tensorflow_probability.substrates.jax.distributions as tfd
 
 from functools import partial
 na = jnp.newaxis
@@ -48,33 +49,36 @@ def resample_precision(seed, x, z, Ab, Q, nu, **kwargs):
     '''
     nlags = get_nlags(Ab)
     residuals = x[..., nlags:, :] - apply_ar_params(x, Ab[z])
+    z_mask = jnp.eye(len(Q))[z]
+    z_mask = jnp.moveaxis(z_mask, -1, 1)
     # compute the inverse of the covariance matrix Q for each state
-    # TODO: test this calculation to make sure it's correct
-    Q_inv = jax.vmap(partial(psd_solve, B=jnp.eye(Q.shape[-1])), in_axes=(0, None))(Q)
-    scaled_Q_inv = (Q_inv[z] @ residuals.T).T
+    Q_inv = jax.vmap(psd_solve, in_axes=(0, None))(Q, jnp.eye(Q.shape[-1]))
+    # compute per-batch and per-syllable - @caleb - is there a simpler way? i.e., einsum?
+    scaled_residuals = jax.vmap(jax.vmap(lambda sig, r: (sig @ r.T).T, in_axes=(0, None)), in_axes=(None, 0))(Q_inv, residuals)
+    # select syllable-specific scaled residuals
+    scaled_residuals = (scaled_residuals * z_mask[..., na]).sum(axis=-3)
 
     # compute gamma distribution parameters
     a_post = nu[z] / 2 + x.shape[-1] / 2
-    b_post = nu[z] / 2 + (residuals * scaled_Q_inv).sum(axis=-1) / 2
-
-    tau = jr.gamma(seed, a_post, 1 / b_post)
+    b_post = nu[z] / 2 + (scaled_residuals * residuals).sum(axis=-1) / 2
+    tau = tfd.Gamma(a_post, 1 / b_post).sample(seed=seed)
 
     return tau
 
 
-@jax.jit
+@partial(jax.jit, static_argnames=('num_states', 'nlags'))
 def resample_nu(seed, mask, z, tau, nu, num_states, nlags, N_steps=100, prop_std=0.1, alpha=1, beta=1, **kwargs):
     """
     Resample the degrees of freedom ``nu`` for each state.
     """
     masks = mask[..., nlags:].reshape(1, -1) * jnp.eye(num_states)[:, z.reshape(-1)]
-    N = masks.sum(axis=0)
-    E_tau = (masks * tau.reshape(1, -1)).sum(axis=0) / jnp.clip(N, 1, None)
-    E_logtau = (masks * jnp.log(tau).reshape(1, -1)).sum(axis=0) / jnp.clip(N, 1, None)
+    N = masks.sum(axis=-1)
+    E_tau = (masks * tau.reshape(1, -1)).sum(axis=-1) / jnp.clip(N, 1, None)
+    E_logtau = (masks * jnp.log(tau).reshape(1, -1)).sum(axis=-1) / jnp.clip(N, 1, None)
 
     # sample from uniform distribution
     nu_prop = jr.normal(seed, (num_states, N_steps)) * prop_std + nu[:, na]
-    nu_prop = jax.where(nu_prop < 1e-3, nu[:, na], nu_prop)
+    nu_prop = jnp.where(nu_prop < 1e-3, nu[:, na], nu_prop)
     thresh = jnp.log(jr.uniform(seed, (num_states, N_steps)))
     nu = jax.vmap(_sample_nu, in_axes=(0, 0, 0, 0, 0, 0, None, None))(nu, nu_prop, thresh, E_tau, E_logtau, N, alpha, beta)
     return nu
@@ -178,8 +182,12 @@ def resample_ar_params(seed, *, nlags, num_states, mask, x, z,
     seeds = jr.split(seed, num_states)
 
     masks = mask[..., nlags:].reshape(1,-1) * jnp.eye(num_states)[:, z.reshape(-1)]
-    x_in = pad_affine(get_lags(x * tau, nlags)).reshape(-1, nlags * x.shape[-1] + 1)
-    x_out = x[..., nlags:, :].reshape(-1, x.shape[-1])
+    x_in = jax.vmap(jnp.multiply, in_axes=(-1, None))(pad_affine(get_lags(x, nlags)), tau)
+    x_in = jnp.moveaxis(x_in, 0, -1)
+    x_in = x_in.reshape(-1, nlags * x.shape[-1] + 1)
+    x_out = jax.vmap(jnp.multiply, in_axes=(-1, None))(x[..., nlags:, :], tau)
+    x_out = jnp.moveaxis(x_out, 0, -1)
+    x_out = x_out.reshape(-1, x.shape[-1])
     
     map_fun = partial(_resample_regression_params, x_in, x_out, nu_0, S_0, M_0, K_0)
     Ab, Q = jax.lax.map(map_fun, (seeds, masks))
@@ -234,7 +242,7 @@ def _resample_regression_params(x_in, x_out, nu_0, S_0, M_0, K_0, args):
 
 
 def resample_model(data, seed, states, params, hypparams,
-                   states_only=False, robust=False, **kwargs):
+                   states_only=False, **kwargs):
     """
     Resamples the ARHMM model given the hyperparameters, data,
     current states, and current parameters.
@@ -269,7 +277,7 @@ def resample_model(data, seed, states, params, hypparams,
             seed, **data, **states, **params, 
             **hypparams['trans_hypparams'])
         
-        if robust:
+        if params['robust']:
             params['tau'] = resample_precision(seed, **data, **states, **params, **hypparams['ar_hypparams'])
             params['nu'] = resample_nu(seed, **data, **states, **params, **hypparams['ar_hypparams'])
 

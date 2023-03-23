@@ -16,18 +16,22 @@ def apply_ar_params(x, Ab):
     return apply_affine(x_in, Ab)
 
 
-# TODO: add robust log likelihood
 def robust_ar_log_likelihood(x, params):
-    Ab, Q, nu = params
+    Ab, Q, nu, z = params
     D = x.shape[-1]
     nlags = get_nlags(Ab)
     mu = apply_ar_params(x, Ab)
     residuals = x[..., nlags:, :] - mu
     Q_inv = jax.vmap(psd_solve, in_axes=(0, None))(Q, jnp.eye(Q.shape[-1]))
-    z = (Q_inv @ residuals.T).T
+    z_mask = jnp.eye(len(Q))[z]
+    z_mask = jnp.moveaxis(z_mask, -1, 1)
+    scaled_residuals = jax.vmap(jax.vmap(lambda sig, r: (sig @ r.T).T, in_axes=(0, None)), in_axes=(None, 0))(Q_inv, residuals)
+    # select syllable-specific scaled residuals
+    scaled_residuals = (scaled_residuals * z_mask[..., na]).sum(axis=-3)
 
-    out = -0.5 * (nu + D) * jnp.log(1 + (residuals * z).sum(axis=-1) / nu)
-    out = out + gammaln((nu + D) / 2) - gammaln(nu / 2) - D / 2 * jnp.log(nu) - D / 2 * jnp.log(jnp.pi) - jnp.log(jnp.diag(jnp.linalg.cholesky(Q))).reshape(len(Q), -1).sum(axis=-1)
+    out = -0.5 * (nu + D) * jnp.log(1 + (residuals * scaled_residuals).sum(axis=-1) / nu)
+    log_sum = jax.vmap(lambda Q: jnp.log(jnp.diag(jnp.linalg.cholesky(Q))).sum(), in_axes=(0,))(Q)
+    out = out + gammaln((nu + D) / 2) - gammaln(nu / 2) - D / 2 * jnp.log(nu) - D / 2 * jnp.log(jnp.pi) - log_sum[z]
 
     return out
 

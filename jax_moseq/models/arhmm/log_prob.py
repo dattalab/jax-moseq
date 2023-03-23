@@ -52,7 +52,7 @@ def continuous_stateseq_log_prob(x, z, Ab, Q, nu, robust, **kwargs):
         Log probability of ``x``.
     """
     if robust:
-        return robust_ar_log_likelihood(x, (Ab[z], Q[z], nu[z]))
+        return robust_ar_log_likelihood(x, (Ab[z], Q, nu[z], z))
     return ar_log_likelihood(x, (Ab[z], Q[z]))
 
 
