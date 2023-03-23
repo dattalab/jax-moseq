@@ -189,8 +189,10 @@ def resample_ar_params(seed, *, nlags, num_states, mask, x, z,
     masks = mask[..., nlags:].reshape(1,-1) * jnp.eye(num_states)[:, z.reshape(-1)]
     x_in = pad_affine(get_lags(x, nlags)).reshape(-1, nlags * x.shape[-1] + 1)
     x_out = x[..., nlags:, :].reshape(-1, x.shape[-1])
-    x_in = x_in * tau.reshape(-1, 1)
-    x_out = x_out * tau.reshape(-1, 1)
+    print(x_in.shape)
+    print(tau.shape)
+    x_in = x_in * jnp.sqrt(tau.reshape(-1, 1))
+    x_out = x_out * jnp.sqrt(tau.reshape(-1, 1))
 
     print(jnp.isnan(x_in).sum(), jnp.isnan(x_out).sum())
     
