@@ -238,7 +238,7 @@ def init_model(data=None,
         if verbose:
             print('ARHMM: Initializing parameters')
         params = init_params(seed, robust=robust, **hypparams)
-        params['tau'] = jnp.ones(x.shape[:-1])
+        params['tau'] = jnp.ones(x.shape[:-1])[..., ar_hypparams['nlags']:]
     else:
         params = jax.device_put(params)
     model['params'] = params
