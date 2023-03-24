@@ -9,6 +9,7 @@ from dynamax.linear_gaussian_ssm.inference import (lgssm_posterior_sample,
                                                    ParamsLGSSMEmissions,)
 
 from jax_moseq.utils.autoregression import get_nlags
+from jax_moseq.utils import safe_cho_factor
 
 na = jnp.newaxis
 

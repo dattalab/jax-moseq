@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
 
-from jax_moseq.utils import jax_io, device_put_as_scalar, fit_pca, check_precision
+from jax_moseq.utils import jax_io, device_put_as_scalar, fit_pca, check_precision, safe_cho_factor
 
 from jax_moseq.models import arhmm
 from jax_moseq.models.slds.gibbs import resample_scales
@@ -43,7 +43,7 @@ def init_obs_params(pca, Y, mask, whiten, latent_dim, **kwargs):
         Y_flat = Y[mask > 0]
         latents_flat = jax_io(pca.transform)(Y_flat)[:, :latent_dim]
         cov = jnp.cov(latents_flat.T)
-        W = jnp.linalg.cholesky(cov)
+        W, _ = safe_cho_factor(cov)
         C = W.T @ C
         
     Cd = jnp.hstack([C.T, d[:, na]])

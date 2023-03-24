@@ -5,7 +5,6 @@ import jax.random as jr
 import tensorflow_probability.substrates.jax.distributions as tfd
 
 from jax_moseq.utils import apply_affine
-from jax_moseq.utils.distributions import sample_mniw
 
 na = jnp.newaxis
 
