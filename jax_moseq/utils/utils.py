@@ -12,6 +12,31 @@ def symmetrize(A):
     """Symmetrize a matrix."""
     return (A + A.swapaxes(-1, -2)) / 2
 
+
+def safe_cho_factor(A, lower=True, diagonal_boost=1e-6):
+    """
+    Cholesky factorization with diagonal boosting to ensure positive 
+    definiteness. 
+    
+    Parameters
+    ----------
+    A: jax array, shape (n,n)
+        A positive semi-definite matrix
+    diagonal_boost: float, default=1e-6
+        Amount to boost the diagonal elements of A
+
+    Returns
+    -------
+    L: jax array, shape (n,n)
+        Lower triangular matrix such that L L^T = A
+    lower: bool
+        Whether the matrix is lower triangular
+    """
+    A = symmetrize(A) + diagonal_boost * jnp.eye(A.shape[-1])
+    L, lower = cho_factor(A, lower=lower)
+    return L, lower
+
+
 def psd_solve(A, B, diagonal_boost=1e-6):
     """
     Solves the linear system Ax=B, assuming A is positive semi-definite. 
@@ -31,8 +56,7 @@ def psd_solve(A, B, diagonal_boost=1e-6):
     x: jax array, shape (...,n)
         Solution of the linear system Ax=b
     """
-    A = symmetrize(A) + diagonal_boost * jnp.eye(A.shape[-1])
-    L, lower = cho_factor(A, lower=True)
+    L, lower = safe_cho_factor(A, lower=True, diagonal_boost=diagonal_boost)
     x = cho_solve((L, lower), B)
     return x
 

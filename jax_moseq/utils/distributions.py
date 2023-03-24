@@ -1,6 +1,8 @@
 import jax, jax.numpy as jnp, jax.random as jr
 import tensorflow_probability.substrates.jax.distributions as tfd
 from dynamax.hidden_markov_model.inference import hmm_posterior_sample
+
+from jax_moseq.utils import safe_cho_factor
 na = jnp.newaxis
 
 def sample_vonmises(seed, theta, kappa):
@@ -26,9 +28,9 @@ def sample_chi2(seed, degs):
 def sample_mn(seed, M, U, V):
     G = jr.normal(seed,M.shape)
     print('mn 1', jnp.isnan(G).sum())
-    G = jnp.dot(jnp.linalg.cholesky(U),G)
+    G = jnp.dot(safe_cho_factor(U)[0], G)
     print('mn 2', jnp.isnan(G).sum())
-    G = jnp.dot(G,jnp.linalg.cholesky(V).T)
+    G = jnp.dot(G, safe_cho_factor(V)[0].T)
     print('mn 3', jnp.isnan(G).sum())
     return M + G
 
@@ -43,7 +45,7 @@ def sample_invwishart(seed,S,nu):
     R = jnp.linalg.qr(x,'r')
     print('invw 3', jnp.isnan(R).sum())
     print('S', S)
-    chol = jnp.linalg.cholesky(S)
+    chol, _ = safe_cho_factor(S)
     print('invw 4', jnp.isnan(chol).sum())
     
     T = jax.scipy.linalg.solve_triangular(R.T,chol.T,lower=True).T

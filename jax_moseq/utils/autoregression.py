@@ -5,7 +5,7 @@ from jax.scipy.special import gammaln
 
 import tensorflow_probability.substrates.jax.distributions as tfd
 
-from jax_moseq.utils import apply_affine, psd_solve
+from jax_moseq.utils import apply_affine, psd_solve, safe_cho_factor
 
 na = jnp.newaxis
 
@@ -30,7 +30,7 @@ def robust_ar_log_likelihood(x, params):
     scaled_residuals = (scaled_residuals * z_mask[..., na]).sum(axis=-3)
 
     out = -0.5 * (nu + D) * jnp.log(1 + (residuals * scaled_residuals).sum(axis=-1) / nu)
-    log_sum = jax.vmap(lambda Q: jnp.log(jnp.diag(jnp.linalg.cholesky(Q))).sum(), in_axes=(0,))(Q)
+    log_sum = jax.vmap(lambda Q: jnp.log(jnp.diag(safe_cho_factor(Q)[0])).sum(), in_axes=(0,))(Q)
     out = out + gammaln((nu + D) / 2) - gammaln(nu / 2) - D / 2 * jnp.log(nu) - D / 2 * jnp.log(jnp.pi) - log_sum[z]
 
     return out
