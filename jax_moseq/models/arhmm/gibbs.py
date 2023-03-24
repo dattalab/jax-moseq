@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import jax.random as jr
 from jax.scipy.special import gammaln
 
-from jax_moseq.utils import pad_affine, psd_solve, psd_inv
+from jax_moseq.utils import pad_affine, psd_solve, psd_inv, symmetrize
 
 from jax_moseq.utils.distributions import (
     sample_mniw,
@@ -53,7 +53,7 @@ def resample_precision(seed, x, z, Ab, Q, nu, **kwargs):
     z_mask = jnp.eye(len(Q))[z]
     z_mask = jnp.moveaxis(z_mask, -1, 1)
     # compute the inverse of the covariance matrix Q for each state
-    Q_inv = jax.vmap(psd_solve, in_axes=(0, None))(Q, jnp.eye(Q.shape[-1]))
+    Q_inv = jax.vmap(psd_inv, in_axes=(0,))(Q)
     # compute per-batch and per-syllable - @caleb - is there a simpler way? i.e., einsum?
     scaled_residuals = jax.vmap(jax.vmap(lambda sig, r: (sig @ r.T).T, in_axes=(0, None)), in_axes=(None, 0))(Q_inv, residuals)
     # select syllable-specific scaled residuals
@@ -244,14 +244,20 @@ def _resample_regression_params(x_in, x_out, nu_0, S_0, M_0, K_0, args):
     S_out_in = jnp.einsum('ti,tj,t->ij', x_out, x_in, mask)
     S_in_in = jnp.einsum('ti,tj,t->ij', x_in, x_in, mask)
     print('regression stats', jnp.isnan(S_out_out).sum(), jnp.isnan(S_out_in).sum(), jnp.isnan(S_in_in).sum())
+    print('S_out_out equality', jnp.allclose(S_out_out, S_out_out.T))
+    print('S_0 equality', jnp.allclose(S_0, S_0.T))
     
     K_0_inv = psd_inv(K_0)
     K_n_inv = K_0_inv + S_in_in
+    print('K_n_inv equality', jnp.allclose(K_n_inv, K_n_inv.T))
 
     K_n = psd_inv(K_n_inv)
+    print('K_n equality', jnp.allclose(K_n, K_n.T))
     M_n = psd_solve(K_n_inv.T, K_0_inv @ M_0.T + S_out_in.T).T  
      
     S_n = S_0 + S_out_out + (M_0 @ K_0_inv @ M_0.T - M_n @ K_n_inv @ M_n.T)
+    S_n = symmetrize(S_n)
+    print('S_n equality', jnp.allclose(S_n, S_n.T))
     return sample_mniw(seed, nu_0 + mask.sum(), S_n, M_n, K_n)
 
 
