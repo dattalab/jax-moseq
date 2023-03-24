@@ -7,7 +7,8 @@ from jax_moseq.utils import pad_affine, psd_solve, psd_inv, symmetrize
 
 from jax_moseq.utils.distributions import (
     sample_mniw,
-    sample_hmm_stateseq
+    sample_hmm_stateseq,
+    sample_gamma
 )
 from jax_moseq.utils.autoregression import (
     get_lags,
@@ -16,7 +17,6 @@ from jax_moseq.utils.autoregression import (
     apply_ar_params
 )
 from jax_moseq.utils.transitions import resample_hdp_transitions
-import tensorflow_probability.substrates.jax.distributions as tfd
 
 from functools import partial
 na = jnp.newaxis
@@ -62,12 +62,13 @@ def resample_precision(seed, x, z, Ab, Q, nu, **kwargs):
     # compute gamma distribution parameters
     a_post = nu[z] / 2 + x.shape[-1] / 2
     b_post = nu[z] / 2 + (scaled_residuals * residuals).sum(axis=-1) / 2
-    print('a_post, b_post nans', jnp.isnan(a_post).sum(), jnp.isnan(b_post).sum())
-    print('b_post smaller than 0', (b_post < 0).sum())
-    print('b_post', b_post)
-    print('q', Q)
-    tau = tfd.Gamma(a_post, 1 / b_post).sample(seed=seed)
-    print('tau', jnp.isnan(tau).sum())
+    # print('a_post, b_post nans', jnp.isnan(a_post).sum(), jnp.isnan(b_post).sum())
+    # print('b_post smaller than 0', (b_post < 0).sum())
+    # print('b_post', b_post)
+    # print('q', Q)
+    tau = sample_gamma(seed, a_post, b_post)
+    # print(tau)
+    # print('tau', jnp.isnan(tau).sum())
 
     return tau
 
@@ -190,19 +191,19 @@ def resample_ar_params(seed, *, nlags, num_states, mask, x, z,
     masks = mask[..., nlags:].reshape(1,-1) * jnp.eye(num_states)[:, z.reshape(-1)]
     x_in = pad_affine(get_lags(x, nlags)).reshape(-1, nlags * x.shape[-1] + 1)
     x_out = x[..., nlags:, :].reshape(-1, x.shape[-1])
-    print(x_in.shape)
-    print(tau.shape)
+    # print(x_in.shape)
+    # print(tau.shape)
     x_in = x_in * jnp.sqrt(tau.reshape(-1, 1))
     x_out = x_out * jnp.sqrt(tau.reshape(-1, 1))
 
-    print(jnp.isnan(x_in).sum(), jnp.isnan(x_out).sum())
+    # print(jnp.isnan(x_in).sum(), jnp.isnan(x_out).sum())
     
     map_fun = partial(_resample_regression_params, x_in, x_out, nu_0, S_0, M_0, K_0)
     _tmp = [map_fun((seed, mask)) for seed, mask in zip(seeds, masks)]
     Ab = jnp.array([_t[0] for _t in _tmp])
     Q = jnp.array([_t[1] for _t in _tmp])
-    print('shape Ab', Ab.shape, 'shape Q', Q.shape)
-    print('Q nans', jnp.isnan(Q).sum(), 'Ab nans', jnp.isnan(Ab).sum())
+    # print('shape Ab', Ab.shape, 'shape Q', Q.shape)
+    # print('Q nans', jnp.isnan(Q).sum(), 'Ab nans', jnp.isnan(Ab).sum())
     # Ab, Q = jax.lax.map(map_fun, (seeds, masks))
     return Ab, Q
 
