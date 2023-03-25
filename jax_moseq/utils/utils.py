@@ -20,14 +20,14 @@ def safe_cho_factor(A, lower=True, diagonal_boost=1e-6):
     
     Parameters
     ----------
-    A: jax array, shape (n,n)
+    A: jax array, shape (...,n,n)
         A positive semi-definite matrix
     diagonal_boost: float, default=1e-6
         Amount to boost the diagonal elements of A
 
     Returns
     -------
-    L: jax array, shape (n,n)
+    L: jax array, shape (...,n,n)
         Lower triangular matrix such that L L^T = A
     lower: bool
         Whether the matrix is lower triangular
@@ -47,13 +47,13 @@ def psd_solve(A, B, diagonal_boost=1e-6):
     
     Parameters
     ----------
-    A: jax array, shape (n,n)
+    A: jax array, shape (...,n,n)
         A positive semi-definite matrix
-    b: jax array, shape (...,n)
+    b: jax array, shape (...,n,m)
 
     Returns
     -------
-    x: jax array, shape (...,n)
+    x: jax array, shape (...,n,m)
         Solution of the linear system Ax=b
     """
     L, lower = safe_cho_factor(A, lower=True, diagonal_boost=diagonal_boost)
@@ -69,15 +69,16 @@ def psd_inv(A, diagonal_boost=1e-6):
 
     Parameters
     ----------
-    A: jax array, shape (n,n)
+    A: jax array, shape (...,n,n)
         A positive semi-definite matrix
 
     Returns
     -------
-    Ainv: jax array, shape (n,n)
+    Ainv: jax array, shape (...,n,n)
         The inverse of A
     """
-    Ainv = psd_solve(A, jnp.eye(A.shape[-1]), diagonal_boost=diagonal_boost)
+    I = jnp.broadcast_to(jnp.eye(A.shape[-1]), A.shape)
+    Ainv = psd_solve(A, I, diagonal_boost=diagonal_boost)
     return symmetrize(Ainv)
 
 
