@@ -39,37 +39,11 @@ def resample_precision(seed, x, z, Ab, Q, nu, **kwargs):
     Returns:
         tau: jax array, shape (N, T)
     """
-    # compute residual: will be array with same shape as z
-    # compute tau: will be array with same shape as z
-    # need to use z to index Ab, Q, nu
-
-    '''
-    residual_vector = x - apply_ar_params(x, Ab[z])
-    residual_scalar = some_function_of(residual_vector, Q)
-    tau = sample_from_some_distribution(residual_scalar, nu, x.shape[-1])
-    '''
-    nlags = get_nlags(Ab)
-    residuals = x[..., nlags:, :] - apply_ar_params(x, Ab[z])
-    z_mask = jnp.eye(len(Q))[z]
-    z_mask = jnp.moveaxis(z_mask, -1, 1)
-    # compute the inverse of the covariance matrix Q for each state
-    Q_inv = jax.vmap(psd_inv, in_axes=(0,))(Q)
-    # compute per-batch and per-syllable - @caleb - is there a simpler way? i.e., einsum?
-    scaled_residuals = jax.vmap(jax.vmap(lambda sig, r: (sig @ r.T).T, in_axes=(0, None)), in_axes=(None, 0))(Q_inv, residuals)
-    # select syllable-specific scaled residuals
-    scaled_residuals = (scaled_residuals * z_mask[..., na]).sum(axis=-3)
-
-    # compute gamma distribution parameters
+    residuals = x[..., get_nlags(Ab):, :] - apply_ar_params(x, Ab[z])
+    mahalanobis = jnp.einsum('...i,...ij,...j', residuals, psd_inv(Q), residuals)
     a_post = nu[z] / 2 + x.shape[-1] / 2
-    b_post = nu[z] / 2 + (scaled_residuals * residuals).sum(axis=-1) / 2
-    # print('a_post, b_post nans', jnp.isnan(a_post).sum(), jnp.isnan(b_post).sum())
-    # print('b_post smaller than 0', (b_post < 0).sum())
-    # print('b_post', b_post)
-    # print('q', Q)
+    b_post = nu[z] / 2 + mahalanobis / 2
     tau = sample_gamma(seed, a_post, b_post)
-    # print(tau)
-    # print('tau', jnp.isnan(tau).sum())
-
     return tau
 
 
