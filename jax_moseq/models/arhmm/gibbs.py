@@ -23,7 +23,7 @@ na = jnp.newaxis
 
 
 ##########################################
-# @jax.jit
+@jax.jit
 def resample_precision(seed, x, z, Ab, Q, nu, **kwargs):
     """
     Resample the precision ``tau`` on each frame.
@@ -122,7 +122,7 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, **kwargs):
     return z
 
 
-# @partial(jax.jit, static_argnames=('num_states','nlags'))
+@partial(jax.jit, static_argnames=('num_states','nlags'))
 def resample_ar_params(seed, *, nlags, num_states, mask, x, z,
                        nu_0, S_0, M_0, K_0, tau, **kwargs):
     """
@@ -165,24 +165,18 @@ def resample_ar_params(seed, *, nlags, num_states, mask, x, z,
     masks = mask[..., nlags:].reshape(1,-1) * jnp.eye(num_states)[:, z.reshape(-1)]
     x_in = pad_affine(get_lags(x, nlags)).reshape(-1, nlags * x.shape[-1] + 1)
     x_out = x[..., nlags:, :].reshape(-1, x.shape[-1])
-    # print(x_in.shape)
-    # print(tau.shape)
     x_in = x_in * jnp.sqrt(tau.reshape(-1, 1))
     x_out = x_out * jnp.sqrt(tau.reshape(-1, 1))
-
-    # print(jnp.isnan(x_in).sum(), jnp.isnan(x_out).sum())
     
     map_fun = partial(_resample_regression_params, x_in, x_out, nu_0, S_0, M_0, K_0)
     _tmp = [map_fun((seed, mask)) for seed, mask in zip(seeds, masks)]
     Ab = jnp.array([_t[0] for _t in _tmp])
     Q = jnp.array([_t[1] for _t in _tmp])
-    # print('shape Ab', Ab.shape, 'shape Q', Q.shape)
-    # print('Q nans', jnp.isnan(Q).sum(), 'Ab nans', jnp.isnan(Ab).sum())
     # Ab, Q = jax.lax.map(map_fun, (seeds, masks))
     return Ab, Q
 
 
-# @jax.jit
+@jax.jit
 def _resample_regression_params(x_in, x_out, nu_0, S_0, M_0, K_0, args):
     """
     Resamples regression parameters from a Matrix normal
@@ -218,21 +212,14 @@ def _resample_regression_params(x_in, x_out, nu_0, S_0, M_0, K_0, args):
     S_out_out = jnp.einsum('ti,tj,t->ij', x_out, x_out, mask)
     S_out_in = jnp.einsum('ti,tj,t->ij', x_out, x_in, mask)
     S_in_in = jnp.einsum('ti,tj,t->ij', x_in, x_in, mask)
-    print('regression stats', jnp.isnan(S_out_out).sum(), jnp.isnan(S_out_in).sum(), jnp.isnan(S_in_in).sum())
-    print('S_out_out equality', jnp.allclose(S_out_out, S_out_out.T))
-    print('S_0 equality', jnp.allclose(S_0, S_0.T))
     
     K_0_inv = psd_inv(K_0)
     K_n_inv = K_0_inv + S_in_in
-    print('K_n_inv equality', jnp.allclose(K_n_inv, K_n_inv.T))
 
     K_n = psd_inv(K_n_inv)
-    print('K_n equality', jnp.allclose(K_n, K_n.T))
     M_n = psd_solve(K_n_inv.T, K_0_inv @ M_0.T + S_out_in.T).T  
      
     S_n = S_0 + S_out_out + (M_0 @ K_0_inv @ M_0.T - M_n @ K_n_inv @ M_n.T)
-    S_n = symmetrize(S_n)
-    print('S_n equality', jnp.allclose(S_n, S_n.T))
     return sample_mniw(seed, nu_0 + mask.sum(), S_n, M_n, K_n)
 
 
