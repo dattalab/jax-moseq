@@ -52,13 +52,7 @@ Make the new environment accessible in jupyter
 Getting started
 ---------------
 
-Here is some example code for fitting an AR-HMM
-
-.. code-block:: python
-
-   # hello world
-
-
+Checkout the `example notebooks <https://github.com/dattalab/jax-moseq/tree/main/examples>`_
 
 API documentation
 -----------------
