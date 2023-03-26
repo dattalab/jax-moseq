@@ -16,11 +16,7 @@ setuptools.setup(
     ],
     python_requires='>=3.7',
     install_requires=[
-        'tfp-nightly[jax]',
         'numba',
-        'jax',
-        'numpy',
-        'scikit-learn',
         'dynamax',
         'tqdm'
     ], 
