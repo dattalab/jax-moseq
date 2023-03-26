@@ -40,7 +40,7 @@ def resample_precision(seed, x, z, Ab, Q, nu, **kwargs):
         tau: jax array, shape (N, T)
     """
     residuals = x[..., get_nlags(Ab):, :] - apply_ar_params(x, Ab[z])
-    mahalanobis = jnp.einsum('...i,...ij,...j', residuals, psd_inv(Q), residuals)
+    mahalanobis = jnp.einsum('...i,...ij,...j', residuals, psd_inv(Q)[z], residuals)
     a_post = nu[z] / 2 + x.shape[-1] / 2
     b_post = nu[z] / 2 + mahalanobis / 2
     tau = sample_gamma(seed, a_post, b_post)
@@ -73,12 +73,12 @@ def _sample_nu(nu, nu_step, thresh, E_tau, E_logtau, N, alpha, beta):
         nu_step, thresh = args
         nu_prop = nu + nu_step
         return jax.lax.cond(
-            thresh < lp(nu_prop) - lp(nu) and nu_prop > 1e-3,
+            (thresh < lp(nu_prop) - lp(nu)) & (nu_prop > 1e-3),
             lambda _: (nu_prop, nu_prop),
             lambda _: (nu, nu),
             operand=None
         )
-    nu_prop, _ = jax.lax.scan(_sample_nu, nu, (nu_step, thresh))
+    nu_prop, _ = jax.lax.scan(_update_nu, nu, (nu_step, thresh))
     return nu_prop
 
 ##########################################
