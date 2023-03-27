@@ -117,7 +117,7 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, robust, **kwargs):
     if robust:
         log_likelihoods = jax.lax.map(
             partial(robust_ar_log_likelihood, x),
-            (Ab, Q, kwargs['nu'], jnp.tile(mask[na, ..., nlags:, :], (len(Ab), *(1, ) * len(mask.shape))))
+            (Ab, Q, kwargs['nu'], jnp.tile(mask[na, ..., nlags:], (len(Ab), *(1, ) * len(mask.shape))))
         )
     else:
         log_likelihoods = jax.lax.map(partial(ar_log_likelihood, x), (Ab, Q))
