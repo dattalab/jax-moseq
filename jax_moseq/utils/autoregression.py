@@ -5,7 +5,7 @@ from jax.scipy.special import gammaln
 
 import tensorflow_probability.substrates.jax.distributions as tfd
 
-from jax_moseq.utils import apply_affine, psd_solve, safe_cho_factor
+from jax_moseq.utils import apply_affine, safe_cho_factor, psd_inv
 
 na = jnp.newaxis
 
@@ -17,21 +17,17 @@ def apply_ar_params(x, Ab):
 
 
 def robust_ar_log_likelihood(x, params):
-    Ab, Q, nu, z = params
+    Ab, Q, nu, mask = params
     D = x.shape[-1]
-    nlags = get_nlags(Ab)
-    mu = apply_ar_params(x, Ab)
-    residuals = x[..., nlags:, :] - mu
-    Q_inv = jax.vmap(psd_solve, in_axes=(0, None))(Q, jnp.eye(Q.shape[-1]))
-    z_mask = jnp.eye(len(Q))[z]
-    z_mask = jnp.moveaxis(z_mask, -1, 1)
-    scaled_residuals = jax.vmap(jax.vmap(lambda sig, r: (sig @ r.T).T, in_axes=(0, None)), in_axes=(None, 0))(Q_inv, residuals)
-    # select syllable-specific scaled residuals
-    scaled_residuals = (scaled_residuals * z_mask[..., na]).sum(axis=-3)
+    residuals = x[..., get_nlags(Ab):] - apply_ar_params(x, Ab)
+    Q_inv = psd_inv(Q)
+    mahalanobis = jnp.einsum('...i,...ij,...j', residuals, Q_inv, residuals)
 
-    out = -0.5 * (nu + D) * jnp.log(1 + (residuals * scaled_residuals).sum(axis=-1) / nu)
-    log_sum = jax.vmap(lambda Q: jnp.log(jnp.diag(safe_cho_factor(Q)[0])).sum(), in_axes=(0,))(Q)
-    out = out + gammaln((nu + D) / 2) - gammaln(nu / 2) - D / 2 * jnp.log(nu) - D / 2 * jnp.log(jnp.pi) - log_sum[z]
+    L, _ = safe_cho_factor(Q)
+    log_sum = jnp.log(jnp.diag(L)).sum()
+
+    out = -0.5 * (nu + D) * jnp.log(1 + (residuals * mahalanobis * mask[..., na]).sum(axis=-1) / nu)
+    out = out + gammaln((nu + D) / 2) - gammaln(nu / 2) - D / 2 * jnp.log(nu) - D / 2 * jnp.log(jnp.pi) - log_sum
 
     return out
 

@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import jax.random as jr
 from jax.scipy.special import gammaln
 
-from jax_moseq.utils import pad_affine, psd_solve, psd_inv, symmetrize
+from jax_moseq.utils import pad_affine, psd_solve, psd_inv
 
 from jax_moseq.utils.distributions import (
     sample_mniw,
@@ -14,7 +14,8 @@ from jax_moseq.utils.autoregression import (
     get_lags,
     get_nlags,
     ar_log_likelihood,
-    apply_ar_params
+    apply_ar_params,
+    robust_ar_log_likelihood
 )
 from jax_moseq.utils.transitions import resample_hdp_transitions
 
@@ -83,8 +84,8 @@ def _sample_nu(nu, nu_step, thresh, E_tau, E_logtau, N, alpha, beta):
 
 ##########################################
 
-@jax.jit
-def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, **kwargs):
+@partial(jax.jit, static_argnames=('robust',))
+def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, robust, **kwargs):
     """
     Resamples the discrete state sequence ``z``.
 
@@ -113,7 +114,13 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, **kwargs):
     nlags = get_nlags(Ab)
     num_samples = mask.shape[0]
 
-    log_likelihoods = jax.lax.map(partial(ar_log_likelihood, x), (Ab, Q))
+    if robust:
+        log_likelihoods = jax.lax.map(
+            partial(robust_ar_log_likelihood, x),
+            (Ab, Q, kwargs['nu'], jnp.tile(mask[na], (len(Ab), *(1, ) * len(mask.shape))))
+        )
+    else:
+        log_likelihoods = jax.lax.map(partial(ar_log_likelihood, x), (Ab, Q))
     _, z = jax.vmap(sample_hmm_stateseq, in_axes=(0,na,0,0))(
         jr.split(seed, num_samples),
         pi,

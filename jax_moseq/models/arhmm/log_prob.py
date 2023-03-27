@@ -27,8 +27,8 @@ def discrete_stateseq_log_prob(z, pi, **kwargs):
     return jnp.log(pi[z[...,:-1],z[...,1:]])
 
 
-@partial(jax.jit, static_argnames=('robust',))
-def continuous_stateseq_log_prob(x, z, Ab, Q, nu, robust, **kwargs):
+@partial(jax.jit, static_argnames=('robust', 'num_states'))
+def continuous_stateseq_log_prob(x, mask, z, Ab, Q, nu, robust, num_states, **kwargs):
     """
     Calculate the log probability of the trajectory ``x`` at each time 
     step, given switching autoregressive (AR) parameters
@@ -52,7 +52,9 @@ def continuous_stateseq_log_prob(x, z, Ab, Q, nu, robust, **kwargs):
         Log probability of ``x``.
     """
     if robust:
-        return robust_ar_log_likelihood(x, (Ab[z], Q, nu[z], z))
+        masks = mask[..., get_nlags(Ab):] * jnp.eye(num_states)[:, z]
+        return jax.lax.map(partial(robust_ar_log_likelihood, x), (Ab, Q, nu, masks))
+        # return robust_ar_log_likelihood(x, (Ab[z], Q, nu[z], z))
     return ar_log_likelihood(x, (Ab[z], Q[z]))
 
 
@@ -87,7 +89,7 @@ def log_joint_likelihood(x, mask, z, pi, Ab, Q, nu=None, robust=False, **kwargs)
     ll = {}
     
     log_pz = discrete_stateseq_log_prob(z, pi)
-    log_px = continuous_stateseq_log_prob(x, z, Ab, Q, nu, robust)
+    log_px = continuous_stateseq_log_prob(x, mask, z, Ab, Q, nu, robust, **kwargs)
     
     nlags = get_nlags(Ab)
     ll['z'] = (log_pz * mask[..., nlags + 1:]).sum()
