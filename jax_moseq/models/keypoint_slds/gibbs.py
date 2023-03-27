@@ -289,7 +289,7 @@ def resample_location(seed, Y, mask, x, h, s, Cd,
 
 def resample_model(data, seed, states, params, hypparams,
                    noise_prior, ar_only=False, states_only=False,
-                   skip_noise=False, **kwargs):
+                   skip_noise=False, fix_heading=False, **kwargs):
     """
     Resamples the Keypoint SLDS model given the hyperparameters,
     data, noise prior, current states, and current parameters.
@@ -314,6 +314,8 @@ def resample_model(data, seed, states, params, hypparams,
         Whether to restrict sampling to states.
     skip_noise : bool, default=False
         Whether to exclude ``sigmasq`` and ``s`` from resampling.
+    fix_heading : bool, default=False
+        Whether to exclude ``h`` from resampling.
     **kwargs : dict
         Overflow, for convenience.
 
@@ -341,8 +343,9 @@ def resample_model(data, seed, states, params, hypparams,
     states['x'] = resample_continuous_stateseqs(
         seed, **data, **states, **params)
 
-    states['h'] = resample_heading(
-        seed, **data, **states, **params)
+    if not fix_heading:
+        states['h'] = resample_heading(
+            seed, **data, **states, **params)
 
     states['v'] = resample_location(
         seed, **data, **states, **params, 

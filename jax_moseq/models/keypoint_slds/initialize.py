@@ -11,7 +11,7 @@ from jax_moseq.models.keypoint_slds.alignment import preprocess_for_pca
 
 
 def init_states(seed, Y, mask, params, noise_prior, obs_hypparams,
-                Y_flat=None, v=None, h=None, **kwargs):
+                Y_flat=None, v=None, h=None, fix_heading=False, **kwargs):
     """
     Initialize the latent states of the keypoint SLDS from the data,
     parameters, and hyperparameters.
@@ -36,6 +36,9 @@ def init_states(seed, Y, mask, params, noise_prior, obs_hypparams,
         Initial centroid positions.
     h : jax array of shape (N, T), optional
         Initial heading angles.
+    fix_heading : bool, default=False
+        Whether keep the heading angle of the pose fixed. If true,
+        the heading variable ``h`` is initialized as 0. 
     **kwargs : dict, optional
         Arguments to :py:func:`jax_moseq.models.keypoint_slds.alignment.preprocess_for_pca`, as a substitute for
         ``Y_flat``, ``v``, or ``h``.
@@ -46,7 +49,7 @@ def init_states(seed, Y, mask, params, noise_prior, obs_hypparams,
         State values for each latent variable.
     """
     if Y_flat is None:
-        Y_flat, v, h = preprocess_for_pca(Y, **kwargs)
+        Y_flat, v, h = preprocess_for_pca(Y, fix_heading, **kwargs)
 
     x = slds.init_continuous_stateseqs(Y_flat, params['Cd'])
     states = arhmm.init_states(seed, x, mask, params)
@@ -150,6 +153,7 @@ def init_model(data=None,
                
                verbose=False,
                exclude_outliers_for_pca=True,
+               fix_heading=False,
                **kwargs):
     """
     Initialize a keypoint SLDS model dict containing the
@@ -212,6 +216,9 @@ def init_model(data=None,
         Whether to exclude frames with low-confidence keypoints.
         If False, then the low-confidence keypoint coordinates are l
         inearly interpolated.
+    fix_heading : bool, default=False
+        Whether keep the heading angle of the pose fixed. If true,
+        the heading variable ``h`` is initialized as 0. 
     **kwargs : dict, optional
         Unused. For convenience, enables user to invoke function
         by unpacking dict that contains keys not used by the method.
@@ -243,7 +250,8 @@ def init_model(data=None,
     if not (states and params):
         Y, mask = data['Y'], data['mask']
         Y_flat, v, h = preprocess_for_pca(
-            Y, anterior_idxs, posterior_idxs, conf, conf_threshold, verbose)
+            Y, anterior_idxs, posterior_idxs, conf, 
+            conf_threshold, fix_heading, verbose)
 
     if isinstance(seed, int):
         seed = jr.PRNGKey(seed)
@@ -284,7 +292,7 @@ def init_model(data=None,
             print('Keypoint SLDS: Initializing states')
         obs_hypparams = hypparams['obs_hypparams']
         states = init_states(seed, Y, mask, params, noise_prior,
-                             obs_hypparams, Y_flat, v, h)
+                             obs_hypparams, Y_flat, v, h, fix_heading)
     else:
         states = jax.device_put(states)
     model['states'] = states
