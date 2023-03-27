@@ -21,16 +21,15 @@ def robust_ar_log_likelihood(x, params):
     D = x.shape[-1]
     residuals = x[..., get_nlags(Ab):, :] - apply_ar_params(x, Ab)
     Q_inv = psd_inv(Q)
-    # mahalanobis = (Q_inv @ residuals.T).T
     mahalanobis = jnp.einsum('...i,...ij,...j', residuals, Q_inv, residuals)
 
     L, _ = safe_cho_factor(Q)
     log_sum = jnp.log(jnp.diag(L)).sum()
 
-    out = -0.5 * (nu + D) * jnp.log(1 + (mahalanobis * mask) / nu)
+    out = -(nu + D) * jnp.log(1 + mahalanobis / nu) / 2
     out = out + gammaln((nu + D) / 2) - gammaln(nu / 2) - D / 2 * jnp.log(nu) - D / 2 * jnp.log(jnp.pi) - log_sum
 
-    return out
+    return out * mask
 
 
 def ar_log_likelihood(x, params):

@@ -54,7 +54,6 @@ def continuous_stateseq_log_prob(x, mask, z, Ab, Q, nu, robust, **kwargs):
     if robust:
         masks = mask[..., get_nlags(Ab):] * jnp.eye(len(Ab))[:, z]
         return jax.lax.map(partial(robust_ar_log_likelihood, x), (Ab, Q, nu, masks)).sum(0)
-        # return robust_ar_log_likelihood(x, (Ab[z], Q, nu[z], z))
     return ar_log_likelihood(x, (Ab[z], Q[z]))
 
 
