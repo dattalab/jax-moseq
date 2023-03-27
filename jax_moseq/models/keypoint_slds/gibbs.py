@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import jax.random as jr
 
 from jax_moseq.utils.kalman import kalman_sample
-from jax_moseq.utils.distributions import sample_vonmises, sample_scaled_inv_chi2
+from jax_moseq.utils.distributions import sample_vonmises_fisher, sample_scaled_inv_chi2
 
 from jax_moseq.models import arhmm, slds
 from jax_moseq.models.keypoint_slds.alignment import (
@@ -218,9 +218,9 @@ def resample_heading(seed, Y, x, v, s, Cd, sigmasq, **kwargs):
     kappa_sin = S[...,0,1] - S[...,1,0]
     del S
 
-    theta = vector_to_angle(jnp.stack([kappa_cos, kappa_sin], axis=-1))
-    kappa = jnp.sqrt(kappa_cos ** 2 + kappa_sin ** 2)
-    h = sample_vonmises(seed, theta, kappa)
+    mean_direction = jnp.stack([kappa_cos, kappa_sin], axis=-1)
+    sampled_direction = sample_vonmises_fisher(seed, mean_direction)
+    h = vector_to_angle(sampled_direction)
     return h
 
 
@@ -289,7 +289,7 @@ def resample_location(seed, Y, mask, x, h, s, Cd,
 
 def resample_model(data, seed, states, params, hypparams,
                    noise_prior, ar_only=False, states_only=False,
-                   skip_noise=False, **kwargs):
+                   skip_noise=False, fix_heading=False, **kwargs):
     """
     Resamples the Keypoint SLDS model given the hyperparameters,
     data, noise prior, current states, and current parameters.
@@ -314,6 +314,8 @@ def resample_model(data, seed, states, params, hypparams,
         Whether to restrict sampling to states.
     skip_noise : bool, default=False
         Whether to exclude ``sigmasq`` and ``s`` from resampling.
+    fix_heading : bool, default=False
+        Whether to exclude ``h`` from resampling.
     **kwargs : dict
         Overflow, for convenience.
 
@@ -341,8 +343,9 @@ def resample_model(data, seed, states, params, hypparams,
     states['x'] = resample_continuous_stateseqs(
         seed, **data, **states, **params)
 
-    states['h'] = resample_heading(
-        seed, **data, **states, **params)
+    if not fix_heading:
+        states['h'] = resample_heading(
+            seed, **data, **states, **params)
 
     states['v'] = resample_location(
         seed, **data, **states, **params, 

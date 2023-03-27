@@ -3,6 +3,59 @@ import jax
 import jax.numpy as jnp
 from jax.tree_util import tree_map
 from sklearn.decomposition import PCA
+from jax.scipy.linalg import cho_factor, cho_solve
+import inspect
+import functools
+from textwrap import fill
+
+
+def symmetrize(A):
+    """Symmetrize a matrix."""
+    return (A + A.swapaxes(-1, -2)) / 2
+
+def psd_solve(A, B, diagonal_boost=1e-6):
+    """
+    Solves the linear system Ax=B, assuming A is positive semi-definite. 
+    
+    Uses Cholesky decomposition for improved numerical stability and 
+    efficiency. A is symmetrized and diagonal elements are boosted by
+    ``diagonal_boost`` to ensure positive definiteness.
+    
+    Parameters
+    ----------
+    A: jax array, shape (n,n)
+        A positive semi-definite matrix
+    b: jax array, shape (...,n)
+
+    Returns
+    -------
+    x: jax array, shape (...,n)
+        Solution of the linear system Ax=b
+    """
+    A = symmetrize(A) + diagonal_boost * jnp.eye(A.shape[-1])
+    L, lower = cho_factor(A, lower=True)
+    x = cho_solve((L, lower), B)
+    return x
+
+def psd_inv(A, diagonal_boost=1e-6):
+    """
+    Invert a positive semi-definite matrix.
+
+    Uses :py:func:`jax_moseq.utils.psd_solve` for numerical stability
+    and ensures that the inverse matrix is symmetric.
+
+    Parameters
+    ----------
+    A: jax array, shape (n,n)
+        A positive semi-definite matrix
+
+    Returns
+    -------
+    Ainv: jax array, shape (n,n)
+        The inverse of A
+    """
+    Ainv = psd_solve(A, jnp.eye(A.shape[-1]), diagonal_boost=diagonal_boost)
+    return symmetrize(Ainv)
 
 
 def jax_io(fn): 
@@ -157,6 +210,45 @@ def batch(data_dict, keys=None, seg_length=None, seg_overlap=30):
     stack = np.stack(stack)
     mask = np.stack(mask)
     return stack,mask,labels
+
+
+def _check_array_precision(arg, x64):
+    """Checks if precision of `arg` matches `x64`"""
+    permitted_dtypes = [
+        (np.int64 if x64 else np.int32),
+        (jnp.int64 if x64 else jnp.int32),
+        (np.float64 if x64 else np.float32),
+        (jnp.float64 if x64 else jnp.float32)]
+    if isinstance(arg, jnp.ndarray) or isinstance(arg, np.ndarray):
+        if not arg.dtype in permitted_dtypes:  return False   
+    return True
+
+def check_precision(fn):
+    """
+    Decorator to check that the precision of the arguments matches the
+    precision of the jax configuration.
+    """
+    arg_names = inspect.getfullargspec(fn).args
+   
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        x64 = jax.config.x64_enabled
+        args_with_wrong_precision = []
+        for name,arg in list(zip(arg_names,args)) + list(kwargs.items()):
+            check_fn = functools.partial(_check_array_precision, x64=x64)
+            if not jax.tree_util.tree_all(jax.tree_map(check_fn, arg)):
+                args_with_wrong_precision.append(name)
+                
+        if len(args_with_wrong_precision) > 0:
+            msg = f'JAX is configured to use {"64" if x64 else "32"}-bit precision, '
+            msg += f'but following arguments contain {"32" if x64 else "64"}-bit arrays: '
+            msg += ', '.join([f'"{name}"' for name in args_with_wrong_precision])
+            msg += '. Either change the JAX config using `jax.config.update("jax_enable_x64", True/False)` '
+            msg += 'or convert the arguments to the correct precision using `jax_moseq.utils.utils.convert_data_precision`.'
+            raise ValueError(msg)
+
+        return fn(*args, **kwargs)
+    return wrapper
 
 def convert_data_precision(data, x64=None):
     """

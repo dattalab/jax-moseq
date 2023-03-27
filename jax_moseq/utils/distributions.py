@@ -1,10 +1,15 @@
 import jax, jax.numpy as jnp, jax.random as jr
 import tensorflow_probability.substrates.jax.distributions as tfd
-
 from dynamax.hidden_markov_model.inference import hmm_posterior_sample
+na = jnp.newaxis
 
 def sample_vonmises(seed, theta, kappa):
     return tfd.VonMises(theta, kappa).sample(seed=seed)
+
+def sample_vonmises_fisher(seed, direction):
+    kappa = jnp.sqrt((direction**2).sum(-1))
+    direction = direction / kappa[...,na]
+    return tfd.VonMisesFisher(direction, kappa).sample(seed=seed)
 
 def sample_gamma(seed, a, b):
     return jr.gamma(seed, a) / b

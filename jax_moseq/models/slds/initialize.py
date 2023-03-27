@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
 
-from jax_moseq.utils import jax_io, device_put_as_scalar, fit_pca
+from jax_moseq.utils import jax_io, device_put_as_scalar, fit_pca, check_precision
 
 from jax_moseq.models import arhmm
 from jax_moseq.models.slds.gibbs import resample_scales
@@ -288,7 +288,7 @@ def init_model(data=None,
 
     return model
 
-
+@check_precision
 def _check_init_args(data, states, params, hypparams,
                      trans_hypparams, ar_hypparams, obs_hypparams):
     """

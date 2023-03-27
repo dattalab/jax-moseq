@@ -258,11 +258,9 @@ def vector_to_angle(V):
     return jnp.arctan2(V[...,1], V[...,0])
 
 
-def fit_pca(Y, mask, anterior_idxs, posterior_idxs,
-            conf=None, conf_threshold=0.5, verbose=False,
-            PCA_fitting_num_frames=1000000, 
-            exclude_outliers_for_pca=True,
-            **kwargs):
+def fit_pca(Y, mask, anterior_idxs=None, posterior_idxs=None, conf=None, 
+            conf_threshold=0.5, verbose=False, PCA_fitting_num_frames=1000000, 
+            exclude_outliers_for_pca=True, fix_heading=False, **kwargs):
     """
     Fit a PCA model to transformed keypoint coordinates. If ``conf`` is
     not None, perform linear interpolation over outliers defined by
@@ -290,6 +288,9 @@ def fit_pca(Y, mask, anterior_idxs, posterior_idxs,
         Whether to exclude frames with low-confidence keypoints.
         If False, then the low-confidence keypoint coordinates are l
         inearly interpolated.
+    fix_heading : bool, default=False
+        Whether keep the heading angle fixed. If true, the 
+        heading ``h`` is set to 0 and keypoints are not rotated.
     **kwargs : dict
         Overflow, for convenience.
 
@@ -299,20 +300,21 @@ def fit_pca(Y, mask, anterior_idxs, posterior_idxs,
         PCA object fit to observations.
     """
     Y_flat = preprocess_for_pca(
-        Y, anterior_idxs, posterior_idxs, conf, conf_threshold, verbose)[0]
+        Y, anterior_idxs, posterior_idxs, conf, 
+        conf_threshold, fix_heading, verbose)[0]
     
     if not exclude_outliers_for_pca or conf is None: pca_mask = mask
     else: pca_mask = jnp.logical_and(mask, (conf > conf_threshold).all(-1))
     return utils.fit_pca(Y_flat, pca_mask, PCA_fitting_num_frames, verbose)
 
 
-def preprocess_for_pca(Y, anterior_idxs, posterior_idxs,
-                       conf=None, conf_threshold=.5,
+def preprocess_for_pca(Y, anterior_idxs, posterior_idxs, conf=None, 
+                       conf_threshold=.5, fix_heading=False, 
                        verbose=False, **kwargs):
     """
     Prepare keypoint coordinates for PCA by performing egocentric 
-    alignment, changing basis using ``center_embedding(k)``, and 
-    reshaping to a single flat vector per frame.
+    alignment (optional), changing basis using ``center_embedding(k)``,
+    and reshaping to a single flat vector per frame.
     
     Parameters
     ----------
@@ -326,6 +328,9 @@ def preprocess_for_pca(Y, anterior_idxs, posterior_idxs,
         Confidence for each keypoint observation. Must be >= 0.
     conf_threshold : float, default=.5
         Confidence threshold for interpolation.
+    fix_heading : bool, default=False
+        Whether keep the heading angle fixed. If true, the 
+        heading ``h`` is set to 0 and keypoints are not rotated.
     verbose : bool, default=False
         Whether to print progress updates.
     **kwargs : dict
@@ -344,9 +349,13 @@ def preprocess_for_pca(Y, anterior_idxs, posterior_idxs,
             if verbose:
                 print(f'Interpolating {n} ({pct:.1f}%) low-confidence keypoints')
         Y = interpolate(Y, outliers)
-
-    Y_aligned, v, h = align_egocentric(Y, anterior_idxs,
-                                       posterior_idxs)
+    
+    if fix_heading:
+        v = Y.mean(-2).at[..., 2:].set(0)
+        h = jnp.zeros(Y.shape[:-2])
+        Y_aligned = Y - v[...,na,:]
+    else:
+        Y_aligned, v, h = align_egocentric(Y, anterior_idxs, posterior_idxs)
 
     dims = Y.shape[:-2]
     k, d = Y.shape[-2:]
