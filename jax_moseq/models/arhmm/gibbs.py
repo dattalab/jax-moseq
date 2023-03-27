@@ -23,7 +23,6 @@ from functools import partial
 na = jnp.newaxis
 
 
-##########################################
 @jax.jit
 def resample_precision(seed, x, z, Ab, Q, nu, **kwargs):
     """
@@ -82,7 +81,6 @@ def _sample_nu(nu, nu_step, thresh, E_tau, E_logtau, N, alpha, beta):
     nu_prop, _ = jax.lax.scan(_update_nu, nu, (nu_step, thresh))
     return nu_prop
 
-##########################################
 
 @partial(jax.jit, static_argnames=('robust',))
 def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, robust, **kwargs):
@@ -121,6 +119,7 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, robust, **kwargs):
         )
     else:
         log_likelihoods = jax.lax.map(partial(ar_log_likelihood, x), (Ab, Q))
+
     _, z = jax.vmap(sample_hmm_stateseq, in_axes=(0,na,0,0))(
         jr.split(seed, num_samples),
         pi,
@@ -176,10 +175,7 @@ def resample_ar_params(seed, *, nlags, num_states, mask, x, z,
     x_out = x_out * jnp.sqrt(tau.reshape(-1, 1))
     
     map_fun = partial(_resample_regression_params, x_in, x_out, nu_0, S_0, M_0, K_0)
-    _tmp = [map_fun((seed, mask)) for seed, mask in zip(seeds, masks)]
-    Ab = jnp.array([_t[0] for _t in _tmp])
-    Q = jnp.array([_t[1] for _t in _tmp])
-    # Ab, Q = jax.lax.map(map_fun, (seeds, masks))
+    Ab, Q = jax.lax.map(map_fun, (seeds, masks))
     return Ab, Q
 
 

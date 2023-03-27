@@ -144,7 +144,6 @@ def fit_pca(Y, mask, PCA_fitting_num_frames=1000000,
     return pca
 
 
-
 def unbatch(data, labels): 
     """
     Invert :py:func:`jax_moseq.utils.batch`

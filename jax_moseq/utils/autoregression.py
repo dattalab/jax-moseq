@@ -1,6 +1,4 @@
-import jax
 import jax.numpy as jnp
-import jax.random as jr
 from jax.scipy.special import gammaln
 
 import tensorflow_probability.substrates.jax.distributions as tfd
