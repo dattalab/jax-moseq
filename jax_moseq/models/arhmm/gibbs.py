@@ -73,7 +73,7 @@ def _sample_nu(nu, nu_step, thresh, E_tau, E_logtau, N, alpha, beta):
         nu_step, thresh = args
         nu_prop = nu + nu_step
         return jax.lax.cond(
-            (thresh < lp(nu_prop) - lp(nu)) & (nu_prop > 1e-3),
+            (nu_prop > 1e-3) & (thresh < lp(nu_prop) - lp(nu)),
             lambda _: (nu_prop, nu_prop),
             lambda _: (nu, nu),
             operand=None
