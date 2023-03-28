@@ -24,7 +24,7 @@ na = jnp.newaxis
 
 
 @jax.jit
-def resample_precision(seed, x, z, Ab, Q, nu, **kwargs):
+def resample_precision(seed, x, mask, z, Ab, Q, nu, **kwargs):
     """
     Resample the precision ``tau`` on each frame.
 
@@ -44,7 +44,7 @@ def resample_precision(seed, x, z, Ab, Q, nu, **kwargs):
     a_post = nu[z] / 2 + x.shape[-1] / 2
     b_post = nu[z] / 2 + mahalanobis / 2
     tau = sample_gamma(seed, a_post, b_post)
-    return tau
+    return jnp.where(mask[..., get_nlags(Ab):], jnp.clip(tau, 1e-3, 100), 1)
 
 
 @partial(jax.jit, static_argnames=('num_states', 'nlags'))
