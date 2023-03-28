@@ -27,8 +27,8 @@ def robust_ar_log_likelihood(x, params):
     out = -(nu + D) * jnp.log(1 + mahalanobis / nu) / 2
     out = out + gammaln((nu + D) / 2) - gammaln(nu / 2) - D / 2 * jnp.log(nu) - D / 2 * jnp.log(jnp.pi) - log_sum
 
-    # deal with NaNs in LL computation
-    return jnp.where((mask == 1) & ~jnp.isnan(out), out, 0)
+    # TODO: deal with NaNs in LL computation
+    return jnp.where(mask, out, 0)
 
 
 def ar_log_likelihood(x, params):
