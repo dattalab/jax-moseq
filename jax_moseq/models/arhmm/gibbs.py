@@ -196,17 +196,17 @@ def resample_model(data, seed, states, params, hypparams,
     states = states.copy()
 
     if not states_only: 
-        if verbose: print('Resampling pi (transition matrix)')
+        if verbose: print('Resampling `pi` (transition matrix)')
         params['betas'], params['pi'] = resample_hdp_transitions(
             seed, **data, **states, **params, 
             **hypparams['trans_hypparams'])
 
-        if verbose: print('Resampling Ab,Q (AR parameters)')
+        if verbose: print('Resampling `Ab,Q` (AR parameters)')
         params['Ab'], params['Q']= resample_ar_params(
             seed, **data, **states, **params, 
             **hypparams['ar_hypparams'])
 
-    if verbose: print('Resampling z (discrete latent states)')
+    if verbose: print('Resampling `z` (discrete latent states)')
     states['z'] = resample_discrete_stateseqs(
         seed, **data, **states, **params)
 

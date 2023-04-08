@@ -131,11 +131,17 @@ def pad_along_axis(arr, pad_widths, axis=0, value=0):
     Returns
     _______
     padded_arr: ndarray
-
     """
-    pad_widths_full = [(0,0)]*len(arr.shape)
-    pad_widths_full[axis] = pad_widths
-    padded_arr = np.pad(arr, pad_widths_full, constant_values=value)
+    pad_left_shape = list(arr.shape)
+    pad_right_shape = list(arr.shape)
+
+    pad_left_shape[axis] = pad_widths[0]
+    pad_right_shape[axis] = pad_widths[1]
+
+    padding_left = jnp.ones(pad_left_shape, dtype=arr.dtype)*value
+    padding_right = jnp.ones(pad_right_shape, dtype=arr.dtype)*value
+
+    padded_arr = jnp.concatenate([padding_left, arr, padding_right], axis=axis)
     return padded_arr
 
 
