@@ -154,8 +154,9 @@ def _resample_regression_params(x_in, x_out, nu_0, S_0, M_0, K_0, args):
     return sample_mniw(seed, nu_0 + mask.sum(), S_n, M_n, K_n)
 
 
+
 def resample_model(data, seed, states, params, hypparams,
-                   states_only=False, **kwargs):
+                   states_only=False, verbose=False, **kwargs):
     """
     Resamples the ARHMM model given the hyperparameters, data,
     current states, and current parameters.
@@ -174,6 +175,8 @@ def resample_model(data, seed, states, params, hypparams,
         Values for each group of hyperparameters.
     states_only : bool, default=False
         Whether to restrict sampling to states.
+    verbose : bool, default=False
+        Whether to print progress info during resampling.
     **kwargs : dict
         Overflow, for convenience.
 
@@ -186,14 +189,17 @@ def resample_model(data, seed, states, params, hypparams,
     seed = jr.split(seed)[1]
 
     if not states_only: 
+        if verbose: print('Resampling pi (transition matrix)')
         params['betas'], params['pi'] = resample_hdp_transitions(
             seed, **data, **states, **params, 
             **hypparams['trans_hypparams'])
 
+        if verbose: print('Resampling Ab,Q (AR parameters)')
         params['Ab'], params['Q']= resample_ar_params(
             seed, **data, **states, **params, 
             **hypparams['ar_hypparams'])
 
+    if verbose: print('Resampling z (discrete latent states)')
     states['z'] = resample_discrete_stateseqs(
         seed, **data, **states, **params)
 
