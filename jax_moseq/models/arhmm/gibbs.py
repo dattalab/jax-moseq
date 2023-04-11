@@ -1,16 +1,21 @@
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+from jax.scipy.special import gammaln
 
-from jax_moseq.utils import pad_affine, psd_solve
+from jax_moseq.utils import pad_affine, psd_solve, psd_inv
+
 from jax_moseq.utils.distributions import (
     sample_mniw,
-    sample_hmm_stateseq
+    sample_hmm_stateseq,
+    sample_gamma
 )
 from jax_moseq.utils.autoregression import (
     get_lags,
     get_nlags,
-    ar_log_likelihood
+    ar_log_likelihood,
+    apply_ar_params,
+    robust_ar_log_likelihood
 )
 from jax_moseq.utils.transitions import resample_hdp_transitions
 
@@ -18,39 +23,67 @@ from functools import partial
 na = jnp.newaxis
 
 
-##########################################
-def resample_precision(seed, x, z, Ab, Q, nu):
+@jax.jit
+def resample_precision(seed, x, mask, z, Ab, Q, nu, **kwargs):
     """
     Resample the precision ``tau`` on each frame.
+
+    Args:
+        seed: jax random seed
+        x: jax array, shape (N, T, latent_dim)
+        z: jax array, shape (N, T)
+        Ab: jax array, shape (num_states, latent_dim, ar_dim)
+        Q: jax array, shape (num_states, latent_dim, latent_dim)
+        nu: jax array, shape (num_states,)
+
+    Returns:
+        tau: jax array, shape (N, T)
     """
-    # compute residual: will be array with same shape as z
-    # compute tau: will be array with same shape as z
-    # need to use z to index Ab, Q, nu
+    residuals = x[..., get_nlags(Ab):, :] - apply_ar_params(x, Ab[z])
+    mahalanobis = jnp.einsum('...i,...ij,...j', residuals, psd_inv(Q)[z], residuals)
+    a_post = nu[z] / 2 + x.shape[-1] / 2
+    b_post = nu[z] / 2 + mahalanobis / 2
+    tau = sample_gamma(seed, a_post, b_post)
+    return jnp.where(mask[..., get_nlags(Ab):], tau, 1)
 
-    '''
-    residual_vector = x - apply_ar_params(x, Ab[z])
-    residual_scalar = some_function_of(residual_vector, Q)
-    tau = sample_from_some_distribution(residual_scalar, nu, x.shape[-1])
-    '''
-    pass
 
-def resample_robust_ar_params(args):
+@partial(jax.jit, static_argnames=('num_states', 'nlags'))
+def resample_nu(seed, mask, z, tau, nu, num_states, nlags, N_steps=100, prop_std=0.1, alpha=1, beta=1, **kwargs):
     """
-    similar to resample_ar_params, but need to rescale by tau
-    when computing sufficient stats. This means you need to
-    modify _resample_regression_params, where the following
-    lines are now rescaled by tau:
-
-    S_out_out = jnp.einsum('ti,tj,t->ij', x_out, x_out, mask)
-    S_out_in = jnp.einsum('ti,tj,t->ij', x_out, x_in, mask)
-    S_in_in = jnp.einsum('ti,tj,t->ij', x_in, x_in, mask)
+    Resample the degrees of freedom ``nu`` for each state.
     """
+    masks = mask[..., nlags:].reshape(1, -1) * jnp.eye(num_states)[:, z.reshape(-1)]
+    N = masks.sum(axis=-1)
+    E_tau = (masks * tau.reshape(1, -1)).sum(axis=-1) / jnp.clip(N, 1, None)
+    E_logtau = (masks * jnp.log(tau).reshape(1, -1)).sum(axis=-1) / jnp.clip(N, 1, None)
+
+    # sample from uniform distribution
+    nu_step = jr.normal(seed, (num_states, N_steps)) * prop_std
+    thresh = jnp.log(jr.uniform(seed, (num_states, N_steps)))
+    nu = jax.vmap(_sample_nu, in_axes=(0, 0, 0, 0, 0, 0, None, None))(nu, nu_step, thresh, E_tau, E_logtau, N, alpha, beta)
+    return nu
 
 
-##########################################
+def _sample_nu(nu, nu_step, thresh, E_tau, E_logtau, N, alpha, beta):
+    lprior = lambda nu: (alpha - 1) * jnp.log(nu) - beta * nu
+    ll = lambda nu: N * ((nu / 2) * jnp.log(nu / 2) - gammaln(nu / 2) + (nu / 2 - 1) * E_logtau - nu / 2 * E_tau)
+    lp = lambda nu: lprior(nu) + ll(nu)
 
-@jax.jit
-def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, **kwargs):
+    def _update_nu(nu, args):
+        nu_step, thresh = args
+        nu_prop = nu + nu_step
+        return jax.lax.cond(
+            (nu_prop > 1e-3) & (thresh < lp(nu_prop) - lp(nu)),
+            lambda _: (nu_prop, nu_prop),
+            lambda _: (nu, nu),
+            operand=None
+        )
+    nu_prop, _ = jax.lax.scan(_update_nu, nu, (nu_step, thresh))
+    return nu_prop
+
+
+@partial(jax.jit, static_argnames=('robust',))
+def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, robust, **kwargs):
     """
     Resamples the discrete state sequence ``z``.
 
@@ -79,7 +112,14 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, **kwargs):
     nlags = get_nlags(Ab)
     num_samples = mask.shape[0]
 
-    log_likelihoods = jax.lax.map(partial(ar_log_likelihood, x), (Ab, Q))
+    if robust:
+        log_likelihoods = jax.lax.map(
+            partial(robust_ar_log_likelihood, x),
+            (Ab, Q, kwargs['nu'], jnp.tile(mask[na, ..., nlags:], (len(Ab), *(1, ) * len(mask.shape))))
+        )
+    else:
+        log_likelihoods = jax.lax.map(partial(ar_log_likelihood, x), (Ab, Q))
+
     _, z = jax.vmap(sample_hmm_stateseq, in_axes=(0,na,0,0))(
         jr.split(seed, num_samples),
         pi,
@@ -90,7 +130,7 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, **kwargs):
 
 @partial(jax.jit, static_argnames=('num_states','nlags'))
 def resample_ar_params(seed, *, nlags, num_states, mask, x, z,
-                       nu_0, S_0, M_0, K_0, **kwargs):
+                       nu_0, S_0, M_0, K_0, tau, **kwargs):
     """
     Resamples the AR parameters ``Ab`` and ``Q``.
 
@@ -131,6 +171,8 @@ def resample_ar_params(seed, *, nlags, num_states, mask, x, z,
     masks = mask[..., nlags:].reshape(1,-1) * jnp.eye(num_states)[:, z.reshape(-1)]
     x_in = pad_affine(get_lags(x, nlags)).reshape(-1, nlags * x.shape[-1] + 1)
     x_out = x[..., nlags:, :].reshape(-1, x.shape[-1])
+    x_in = x_in * jnp.sqrt(tau.reshape(-1, 1))
+    x_out = x_out * jnp.sqrt(tau.reshape(-1, 1))
     
     map_fun = partial(_resample_regression_params, x_in, x_out, nu_0, S_0, M_0, K_0)
     Ab, Q = jax.lax.map(map_fun, (seeds, masks))
@@ -174,10 +216,10 @@ def _resample_regression_params(x_in, x_out, nu_0, S_0, M_0, K_0, args):
     S_out_in = jnp.einsum('ti,tj,t->ij', x_out, x_in, mask)
     S_in_in = jnp.einsum('ti,tj,t->ij', x_in, x_in, mask)
     
-    K_0_inv = psd_solve(K_0, jnp.eye(K_0.shape[-1]))
+    K_0_inv = psd_inv(K_0)
     K_n_inv = K_0_inv + S_in_in
 
-    K_n = psd_solve(K_n_inv, jnp.eye(K_n_inv.shape[-1]))
+    K_n = psd_inv(K_n_inv)
     M_n = psd_solve(K_n_inv.T, K_0_inv @ M_0.T + S_out_in.T).T  
      
     S_n = S_0 + S_out_out + (M_0 @ K_0_inv @ M_0.T - M_n @ K_n_inv @ M_n.T)
@@ -219,11 +261,15 @@ def resample_model(data, seed, states, params, hypparams,
         params['betas'], params['pi'] = resample_hdp_transitions(
             seed, **data, **states, **params, 
             **hypparams['trans_hypparams'])
+        
+        if params['robust']:
+            params['tau'] = resample_precision(seed, **data, **states, **params, **hypparams['ar_hypparams'])
+            params['nu'] = resample_nu(seed, **data, **states, **params, **hypparams['ar_hypparams'])
 
         params['Ab'], params['Q']= resample_ar_params(
             seed, **data, **states, **params, 
             **hypparams['ar_hypparams'])
-
+        
     states['z'] = resample_discrete_stateseqs(
         seed, **data, **states, **params)
 

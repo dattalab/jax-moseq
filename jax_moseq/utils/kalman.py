@@ -3,6 +3,7 @@ import jax.numpy as jnp
 import jax.random as jr
 
 from jax_moseq.utils.autoregression import get_nlags
+from jax_moseq.utils import safe_cho_factor
 
 na = jnp.newaxis
 
@@ -68,7 +69,7 @@ def kalman_sample(seed, ys, mask, zs, m0, S0, A, B, Q, C, D, Rs):
     def _step(x, args):
         m_pred, S_pred, z, w = args
         m_cond, S_cond = _condition_on(m_pred, S_pred, A[z], B[z], Qinv[z], x)
-        L = jnp.linalg.cholesky(S_cond)
+        L, _ = safe_cho_factor(S_cond)
         x = L @ w + m_cond
         return x, x
     
