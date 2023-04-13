@@ -2,7 +2,8 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 
-from jax_moseq.utils import pad_affine
+from jax_moseq.utils import pad_affine, psd_solve, psd_inv
+
 from jax_moseq.utils.distributions import (
     sample_mniw,
     sample_hmm_stateseq
@@ -15,7 +16,6 @@ from jax_moseq.utils.autoregression import (
 from jax_moseq.utils.transitions import resample_hdp_transitions
 
 from functools import partial
-
 na = jnp.newaxis
 
 
@@ -47,12 +47,9 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, **kwargs):
         Discrete state sequences.
     """
     nlags = get_nlags(Ab)
-
-    # TODO Why not use jax.vmap here? Can specify out_axes=-1 to remove
-    # jnp.moveaxis call below
-    log_likelihoods = jax.lax.map(partial(ar_log_likelihood, x), (Ab, Q))
-
     num_samples = mask.shape[0]
+
+    log_likelihoods = jax.lax.map(partial(ar_log_likelihood, x), (Ab, Q))
     _, z = jax.vmap(sample_hmm_stateseq, in_axes=(0,na,0,0))(
         jr.split(seed, num_samples),
         pi,
@@ -99,31 +96,25 @@ def resample_ar_params(seed, *, nlags, num_states, mask, x, z,
     Q : jax array of shape (num_states, latent_dim, latent_dim)
         Autoregressive noise covariances.
     """
-    seed = jr.split(seed, num_states)
-    
+    seeds = jr.split(seed, num_states)
+
     masks = mask[..., nlags:].reshape(1,-1) * jnp.eye(num_states)[:, z.reshape(-1)]
     x_in = pad_affine(get_lags(x, nlags)).reshape(-1, nlags * x.shape[-1] + 1)
     x_out = x[..., nlags:, :].reshape(-1, x.shape[-1])
     
-    in_axes = (0,0,na,na,na,na,na,na)
-    Ab, Q = jax.vmap(_resample_regression_params, in_axes)(
-        seed, masks, x_in, x_out, nu_0, S_0, M_0, K_0)
+    map_fun = partial(_resample_regression_params, x_in, x_out, nu_0, S_0, M_0, K_0)
+    Ab, Q = jax.lax.map(map_fun, (seeds, masks))
     return Ab, Q
 
 
 @jax.jit
-def _resample_regression_params(seed, mask, x_in, x_out,
-                                nu_0, S_0, M_0, K_0):
+def _resample_regression_params(x_in, x_out, nu_0, S_0, M_0, K_0, args):
     """
     Resamples regression parameters from a Matrix normal
     inverse-Wishart distribution.
 
     Parameters
     ----------
-    seed : jr.PRNGKey
-        JAX random seed.
-    mask : jax array
-        Binary indicator for valid frames.
     x_in : jax array of shape (..., in_dim)
         Regression input.
     x_out : jax array of shape (..., out_dim)
@@ -136,6 +127,9 @@ def _resample_regression_params(seed, mask, x_in, x_out,
         Matrix normal expectation for Ab.
     K_0 : jax array of shape (in_dim, in_dim)
         Matrix normal column scale parameter for Ab.
+    args: tuple (seed, mask)
+        JAX random seed and binary indicator for frames
+        to use for calculating the sufficient statistics.
 
     Returns
     ------
@@ -144,22 +138,25 @@ def _resample_regression_params(seed, mask, x_in, x_out,
     Q : jax array of shape (num_states, out_dim, out_dim)
         Regression noise covariances.
     """
+    seed, mask = args
+
     S_out_out = jnp.einsum('ti,tj,t->ij', x_out, x_out, mask)
     S_out_in = jnp.einsum('ti,tj,t->ij', x_out, x_in, mask)
     S_in_in = jnp.einsum('ti,tj,t->ij', x_in, x_in, mask)
     
-    K_0_inv = jnp.linalg.inv(K_0)
+    K_0_inv = psd_inv(K_0)
     K_n_inv = K_0_inv + S_in_in
-    K_n = jnp.linalg.inv(K_n_inv)
-    
-    M_n = (M_0 @ K_0_inv + S_out_in) @ K_n
-    
+
+    K_n = psd_inv(K_n_inv)
+    M_n = psd_solve(K_n_inv.T, K_0_inv @ M_0.T + S_out_in.T).T  
+     
     S_n = S_0 + S_out_out + (M_0 @ K_0_inv @ M_0.T - M_n @ K_n_inv @ M_n.T)
     return sample_mniw(seed, nu_0 + mask.sum(), S_n, M_n, K_n)
 
 
+
 def resample_model(data, seed, states, params, hypparams,
-                   states_only=False, **kwargs):
+                   states_only=False, verbose=False, **kwargs):
     """
     Resamples the ARHMM model given the hyperparameters, data,
     current states, and current parameters.
@@ -178,6 +175,8 @@ def resample_model(data, seed, states, params, hypparams,
         Values for each group of hyperparameters.
     states_only : bool, default=False
         Whether to restrict sampling to states.
+    verbose : bool, default=False
+        Whether to print progress info during resampling.
     **kwargs : dict
         Overflow, for convenience.
 
@@ -190,14 +189,17 @@ def resample_model(data, seed, states, params, hypparams,
     seed = jr.split(seed)[1]
 
     if not states_only: 
+        if verbose: print('Resampling pi (transition matrix)')
         params['betas'], params['pi'] = resample_hdp_transitions(
             seed, **data, **states, **params, 
             **hypparams['trans_hypparams'])
 
+        if verbose: print('Resampling Ab,Q (AR parameters)')
         params['Ab'], params['Q']= resample_ar_params(
             seed, **data, **states, **params, 
             **hypparams['ar_hypparams'])
 
+    if verbose: print('Resampling z (discrete latent states)')
     states['z'] = resample_discrete_stateseqs(
         seed, **data, **states, **params)
 

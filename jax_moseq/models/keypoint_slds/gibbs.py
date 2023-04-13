@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import jax.random as jr
 
 from jax_moseq.utils.kalman import kalman_sample
-from jax_moseq.utils.distributions import sample_vonmises, sample_scaled_inv_chi2
+from jax_moseq.utils.distributions import sample_vonmises_fisher, sample_scaled_inv_chi2
 
 from jax_moseq.models import arhmm, slds
 from jax_moseq.models.keypoint_slds.alignment import (
@@ -218,9 +218,9 @@ def resample_heading(seed, Y, x, v, s, Cd, sigmasq, **kwargs):
     kappa_sin = S[...,0,1] - S[...,1,0]
     del S
 
-    theta = vector_to_angle(jnp.stack([kappa_cos, kappa_sin], axis=-1))
-    kappa = jnp.sqrt(kappa_cos ** 2 + kappa_sin ** 2)
-    h = sample_vonmises(seed, theta, kappa)
+    mean_direction = jnp.stack([kappa_cos, kappa_sin], axis=-1)
+    sampled_direction = sample_vonmises_fisher(seed, mean_direction)
+    h = vector_to_angle(sampled_direction)
     return h
 
 
@@ -300,9 +300,11 @@ def resample_location(seed, Y, mask, x, h, s, Cd,
     return v
 
 
+
 def resample_model(data, seed, states, params, hypparams,
                    noise_prior, ar_only=False, states_only=False,
-                   skip_noise=False, **kwargs):
+                   skip_noise=False, fix_heading=False, verbose=False,
+                   **kwargs):
     """
     Resamples the Keypoint SLDS model given the hyperparameters,
     data, noise prior, current states, and current parameters.
@@ -327,8 +329,10 @@ def resample_model(data, seed, states, params, hypparams,
         Whether to restrict sampling to states.
     skip_noise : bool, default=False
         Whether to exclude ``sigmasq`` and ``s`` from resampling.
-    **kwargs : dict
-        Overflow, for convenience.
+    fix_heading : bool, default=False
+        Whether to exclude ``h`` from resampling.
+    verbose : bool, default=False
+        Whether to print progress info during resampling.
 
     Returns
     ------
@@ -337,7 +341,7 @@ def resample_model(data, seed, states, params, hypparams,
         updated seed, states, and parameters of the model.
     """
     model = arhmm.resample_model(data, seed, states, params,
-                                 hypparams, states_only)
+                                 hypparams, states_only, verbose=verbose)
     if ar_only:
         model['noise_prior'] = noise_prior
         return model
@@ -347,21 +351,27 @@ def resample_model(data, seed, states, params, hypparams,
     states = model['states']
 
     if not (states_only or skip_noise):
+        if verbose: print('Resampling sigmasq (global noise scales)')
         params['sigmasq'] = resample_obs_variance(
             seed, **data, **states, **params, 
             s_0=noise_prior, **hypparams['obs_hypparams'])
 
+    if verbose: print('Resampling x (continuous latent states)')
     states['x'] = resample_continuous_stateseqs(
         seed, **data, **states, **params)
 
-    states['h'] = resample_heading(
-        seed, **data, **states, **params)
+    if not fix_heading:
+        if verbose: print('Resampling h (heading)')
+        states['h'] = resample_heading(
+            seed, **data, **states, **params)
 
+    if verbose: print('Resampling v (location)')
     states['v'] = resample_location(
         seed, **data, **states, **params, 
         **hypparams['cen_hypparams'])
 
     if not skip_noise:
+        if verbose: print('Resampling s (local noise scales)')
         states['s'] = resample_scales(
             seed, **data, **states, **params, 
             s_0=noise_prior, **hypparams['obs_hypparams'])

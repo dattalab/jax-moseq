@@ -19,7 +19,7 @@ conda activate jax_moseq
 pip install "jax[cpu]"
 
 # MacOS and Linux users (GPU)
-pip install "jax[cuda]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+pip install "jax[cuda11_cudnn82]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 
 # Windows users (CPU)
 pip install jax https://whls.blob.core.windows.net/unstable/cpu/jaxlib-0.3.22-cp39-cp39-win_amd64.whl
@@ -37,3 +37,7 @@ pip install -U git+https://github.com/dattalab/jax-moseq
 ```
 python -m ipykernel install --user --name=jax_moseq
 ```
+
+# License
+MoSeq is freely available for academic use under a license provided by Harvard University. Please refer to the license file for details. If you are interested in using MoSeq for commercial purposes please contact Bob Datta directly at srdatta@hms.harvard.edu, who will put you in touch with the appropriate people in the Harvard Technology Transfer office.
+

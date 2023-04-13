@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 
-from jax_moseq.utils import device_put_as_scalar
+from jax_moseq.utils import device_put_as_scalar, check_precision
 from jax_moseq.utils.transitions import init_hdp_transitions
 from jax_moseq.utils.distributions import sample_mniw
 
@@ -228,7 +228,7 @@ def init_model(data=None,
 
     return model
 
-
+@check_precision
 def _check_init_args(data, states, params, hypparams,
                      trans_hypparams, ar_hypparams):
     """

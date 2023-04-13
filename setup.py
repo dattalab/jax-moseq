@@ -1,11 +1,11 @@
 import setuptools
 
-with open("README.md", 'r') as f:
+with open("README.md", 'r', encoding='utf-8') as f:
     long_description = f.read()
 
 setuptools.setup(
     name='jax-moseq',
-    version='0.0.0',
+    version='0.0.1',
     author='Caleb Weinreb',
     author_email='calebsw@gmail.com',
     include_package_data=True,
@@ -14,14 +14,16 @@ setuptools.setup(
         'Programming Language :: Python :: 3',
         'Operating System :: OS Independent'
     ],
-    python_requires='>=3.7',
+    python_requires='>=3.8',
     install_requires=[
-        'tfp-nightly[jax]',
         'numba',
         'jax',
         'numpy',
         'scikit-learn',
-        'dynamax'
+        'dynamax',
+        'chex==0.1.6', 
+        'tqdm',
     ], 
-    url='https://github.com/dattalab/jax-moseq'
+    url='https://github.com/dattalab/jax-moseq/tree/0.0.0',
+    download_url='https://github.com/dattalab/jax-moseq/archive/refs/tags/0.0.0.tar.gz'
 )

@@ -4,7 +4,7 @@ from numba import njit, prange
 import jax
 import jax.numpy as jnp
 import jax.random as jr
-
+eps = jnp.finfo(jnp.float32).tiny
 from functools import partial
 
 
@@ -333,4 +333,7 @@ def init_hdp_transitions(seed, num_states, alpha, kappa, gamma, **kwargs):
     pseudo_counts = jnp.zeros((num_states, num_states))
     betas, pi = sample_hdp_transitions(seeds[1], pseudo_counts, betas_init,
                                        alpha, kappa, gamma)
+    
+    # pseudocount for numerical stability
+    pi = (pi+eps)/(pi+eps).sum(1)[:,None]
     return betas, pi
