@@ -47,7 +47,7 @@ def init_ar_params(seed, *, num_states, nu_0, S_0, M_0, K_0, **kwargs):
     return Ab, Q
 
 
-def init_states(seed, x, mask, params, **kwargs):
+def init_states(seed, x, mask, params, robust=False, **kwargs):
     """
     Initialize the latent states of the ARHMM from the
     data and parameters.
@@ -70,7 +70,7 @@ def init_states(seed, x, mask, params, **kwargs):
     states : dict
         State values for each latent variable.
     """
-    z = resample_discrete_stateseqs(seed, x, mask, **params)
+    z = resample_discrete_stateseqs(seed, x, mask, robust=robust, **params)
     return {'z': z, 'tau': jnp.ones(z.shape)}
 
 
@@ -245,7 +245,7 @@ def init_model(data=None,
     if states is None:
         if verbose:
             print('ARHMM: Initializing states')
-        states = init_states(seed, x, mask, params)
+        states = init_states(seed, x, mask, params, robust=robust)
     else:
         states = jax.device_put(states)
     model['states'] = states
