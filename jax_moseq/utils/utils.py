@@ -13,7 +13,7 @@ def symmetrize(A):
     return (A + A.swapaxes(-1, -2)) / 2
 
 
-def safe_cho_factor(A, lower=True, diagonal_boost=1e-6):
+def safe_cho_factor(A, lower=True, diagonal_boost=1e-4):
     """
     Cholesky factorization with diagonal boosting to ensure positive 
     definiteness. 
