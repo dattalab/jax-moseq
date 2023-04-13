@@ -120,4 +120,4 @@ def model_likelihood(data, states, params,
         Dictionary mapping state variable name to its
         total log probability.
     """
-    return log_joint_likelihood(**data, **states, **params **hypparams)
+    return log_joint_likelihood(**data, **states, **params, **hypparams)
