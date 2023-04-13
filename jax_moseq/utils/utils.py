@@ -6,12 +6,36 @@ from sklearn.decomposition import PCA
 from jax.scipy.linalg import cho_factor, cho_solve
 import inspect
 import functools
-from textwrap import fill
 
 
 def symmetrize(A):
     """Symmetrize a matrix."""
     return (A + A.swapaxes(-1, -2)) / 2
+
+
+def safe_cho_factor(A, lower=True, diagonal_boost=1e-4):
+    """
+    Cholesky factorization with diagonal boosting to ensure positive 
+    definiteness. 
+    
+    Parameters
+    ----------
+    A: jax array, shape (...,n,n)
+        A positive semi-definite matrix
+    diagonal_boost: float, default=1e-6
+        Amount to boost the diagonal elements of A
+
+    Returns
+    -------
+    L: jax array, shape (...,n,n)
+        Lower triangular matrix such that L L^T = A
+    lower: bool
+        Whether the matrix is lower triangular
+    """
+    A = symmetrize(A) + diagonal_boost * jnp.eye(A.shape[-1])
+    L, lower = cho_factor(A, lower=lower)
+    return L, lower
+
 
 def psd_solve(A, B, diagonal_boost=1e-6):
     """
@@ -23,17 +47,16 @@ def psd_solve(A, B, diagonal_boost=1e-6):
     
     Parameters
     ----------
-    A: jax array, shape (n,n)
+    A: jax array, shape (...,n,n)
         A positive semi-definite matrix
-    b: jax array, shape (...,n)
+    b: jax array, shape (...,n,m)
 
     Returns
     -------
-    x: jax array, shape (...,n)
+    x: jax array, shape (...,n,m)
         Solution of the linear system Ax=b
     """
-    A = symmetrize(A) + diagonal_boost * jnp.eye(A.shape[-1])
-    L, lower = cho_factor(A, lower=True)
+    L, lower = safe_cho_factor(A, lower=True, diagonal_boost=diagonal_boost)
     x = cho_solve((L, lower), B)
     return x
 
@@ -46,15 +69,16 @@ def psd_inv(A, diagonal_boost=1e-6):
 
     Parameters
     ----------
-    A: jax array, shape (n,n)
+    A: jax array, shape (...,n,n)
         A positive semi-definite matrix
 
     Returns
     -------
-    Ainv: jax array, shape (n,n)
+    Ainv: jax array, shape (...,n,n)
         The inverse of A
     """
-    Ainv = psd_solve(A, jnp.eye(A.shape[-1]), diagonal_boost=diagonal_boost)
+    I = jnp.broadcast_to(jnp.eye(A.shape[-1]), A.shape)
+    Ainv = psd_solve(A, I, diagonal_boost=diagonal_boost)
     return symmetrize(Ainv)
 
 
@@ -118,7 +142,6 @@ def fit_pca(Y, mask, PCA_fitting_num_frames=1000000,
         print(f'PCA: Fitting PCA model to {N_sample} data points')
     pca = PCA().fit(Y_sample)
     return pca
-
 
 
 def unbatch(data, labels): 
