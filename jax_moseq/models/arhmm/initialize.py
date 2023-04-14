@@ -47,7 +47,7 @@ def init_ar_params(seed, *, num_states, nu_0, S_0, M_0, K_0, **kwargs):
     return Ab, Q
 
 
-def init_states(seed, x, mask, params, **kwargs):
+def init_states(seed, x, mask, params, robust=False, **kwargs):
     """
     Initialize the latent states of the ARHMM from the
     data and parameters.
@@ -70,8 +70,8 @@ def init_states(seed, x, mask, params, **kwargs):
     states : dict
         State values for each latent variable.
     """
-    z = resample_discrete_stateseqs(seed, x, mask, **params)
-    return {'z': z}
+    z = resample_discrete_stateseqs(seed, x, mask, robust=robust, **params)
+    return {'z': z, 'tau': jnp.ones(z.shape)}
 
 
 def init_nu(num_states, **kwargs):
@@ -118,13 +118,12 @@ def init_params(seed, trans_hypparams, ar_hypparams, robust=False, **kwargs):
     params = {}
     params['betas'], params['pi'] = init_hdp_transitions(seed, **trans_hypparams)
     params['Ab'], params['Q'] = init_ar_params(seed, **ar_hypparams)
-    params['robust'] = robust
     if robust:
         params['nu'] = init_nu(**ar_hypparams)
     return params
 
 
-def init_hyperparams(trans_hypparams, ar_hypparams, **kwargs):
+def init_hyperparams(trans_hypparams, ar_hypparams, robust=False, **kwargs):
     """
     Formats the hyperparameter dictionary of the ARHMM.
     
@@ -156,6 +155,7 @@ def init_hyperparams(trans_hypparams, ar_hypparams, **kwargs):
     ar_hypparams['M_0'] = jnp.pad(jnp.eye(d), ((0,0),((nlags-1)*d,1)))
     ar_hypparams['num_states'] = trans_hypparams['num_states']
     ar_hypparams['nu_0'] = d + 2
+    ar_hypparams['robust'] = robust
     
     return {'trans_hypparams': trans_hypparams,
             'ar_hypparams': ar_hypparams}
@@ -229,7 +229,7 @@ def init_model(data=None,
     if hypparams is None:
         if verbose:
             print('ARHMM: Initializing hyperparameters')
-        hypparams = init_hyperparams(trans_hypparams, ar_hypparams)
+        hypparams = init_hyperparams(trans_hypparams, ar_hypparams, robust=robust)
     else:
         hypparams = device_put_as_scalar(hypparams)
     model['hypparams'] = hypparams
@@ -238,7 +238,6 @@ def init_model(data=None,
         if verbose:
             print('ARHMM: Initializing parameters')
         params = init_params(seed, robust=robust, **hypparams)
-        params['tau'] = jnp.ones(x.shape[:-1])[..., ar_hypparams['nlags']:]
     else:
         params = jax.device_put(params)
     model['params'] = params
@@ -246,7 +245,7 @@ def init_model(data=None,
     if states is None:
         if verbose:
             print('ARHMM: Initializing states')
-        states = init_states(seed, x, mask, params)
+        states = init_states(seed, x, mask, params, robust=robust)
     else:
         states = jax.device_put(states)
     model['states'] = states

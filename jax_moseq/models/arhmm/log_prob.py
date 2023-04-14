@@ -97,7 +97,7 @@ def log_joint_likelihood(x, mask, z, pi, Ab, Q, nu=None, robust=False, **kwargs)
 
 
 def model_likelihood(data, states, params,
-                     hypparams=None, **kwargs):
+                     hypparams={}, **kwargs):
     """
     Convenience class that invokes :py:func:`jax_moseq.models.arhmm.log_prob.log_joint_likelihood`.
     
@@ -120,4 +120,4 @@ def model_likelihood(data, states, params,
         Dictionary mapping state variable name to its
         total log probability.
     """
-    return log_joint_likelihood(**data, **states, **params)
+    return log_joint_likelihood(**data, **states, **params, **hypparams)
