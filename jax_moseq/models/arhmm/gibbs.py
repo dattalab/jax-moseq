@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 
-from jax_moseq.utils import pad_affine, psd_solve, psd_inv
+from jax_moseq.utils import pad_affine, psd_solve, psd_inv, convert_data_precision
 
 from jax_moseq.utils.distributions import (
     sample_mniw,
@@ -55,7 +55,7 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, **kwargs):
         pi,
         jnp.moveaxis(log_likelihoods,0,-1),
         mask.astype(float)[:,nlags:])
-    return z
+    return convert_data_precision(z)
 
 
 @partial(jax.jit, static_argnames=('num_states','nlags'))
