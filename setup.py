@@ -18,8 +18,9 @@ setuptools.setup(
     install_requires=[
         'numba',
         'dynamax',
-        'chex==0.1.6', 
+        'chex==0.1.6', # not used in code; required to avoid installation issues
         'tqdm',
+        'optree', # TODO: elimninate when all platforms can use JAX >= 0.4.6
     ], 
     url='https://github.com/dattalab/jax-moseq/tree/0.0.0',
     download_url='https://github.com/dattalab/jax-moseq/archive/refs/tags/0.0.0.tar.gz'

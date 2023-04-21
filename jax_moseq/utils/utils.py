@@ -8,6 +8,12 @@ import inspect
 import functools
 from textwrap import fill
 
+# JAX has its own implementation of `tree_flatten_with_path` 
+# but it's only in version of 0.4.6 or later, and currently 
+# some platforms (e.g. Windows) require installing < 0.4.6
+from optree import tree_flatten_with_path
+
+
 
 def symmetrize(A):
     """Symmetrize a matrix."""
@@ -286,3 +292,44 @@ def convert_data_precision(data, x64=None):
             return x.astype(jnp.float64 if x64 else jnp.float32)
     
     return jax.tree_map(convert, data)
+
+
+def check_for_nans(data):
+    """
+    Check for NaNs in all arrays of a pytree.
+
+    Parameters
+    ----------
+    data: pytree (dict, list, tuple, array, or any nested combination thereof)
+        The data to check for NaNs in.
+    
+    Returns
+    -------
+    any_nans: bool
+        Whether any of the arrays in ``data`` contain a NaN.
+
+    nan_info: list of tuples
+        List of arrays containing a NaN, in the form of pairs
+        ``(path, number_of_nans)`` where ``path`` is a sequence of
+        keys that define the location of the array in the pytree.
+
+    messages: list of str
+        List of messages; one for each elements of ``nan_info``.
+    """
+
+    def _format(path, num_nan):
+        path = '/'.join(map(str,path))
+        msg  = f"{num_nan} NaNs found in {path}"
+        return msg
+        
+    nan_info = []
+    messages = []
+    for path,value in zip(*tree_flatten_with_path(data)[:2]):
+        if isinstance(value, jnp.ndarray):
+            if jnp.isnan(value).any():
+                num_nans = jnp.isnan(value).sum().item()
+                nan_info.append((path, num_nans))
+                messages.append(_format(path, num_nans))
+    
+    any_nans = len(nan_info)>0
+    return any_nans, nan_info, messages
