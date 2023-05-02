@@ -5,6 +5,7 @@ import traceback
 import functools
 import contextlib
 import jax.numpy as jnp
+import numpy as np
 
 # JAX has its own implementation of `tree_flatten_with_path` 
 # but it's only in version of 0.4.6 or later, and currently 
@@ -135,7 +136,56 @@ class CheckOutputsError(Exception):
     pass
 
 
-class checked_function_inputs:
+class checked_function_args:
+    """
+    Context manager that activates the :py:func`check_output` decorator
+    and captures the inputs of the decorated function. 
+
+    The `checked_function_args` context manager is a debugging tool
+    that identifies when one or more functions in a call stack are
+    producing outputs with an undesired property (e.g. NaNs), and 
+    what the inputs to those functions were.
+    
+    Examples
+    --------
+    Define a decorator called `nan_check` and use it to check for NaNs
+    in the outputs of `func`. The inputs that caused `func` to produce
+    NaNs are captured by the `checked_function_args` context manager.::
+
+        >>> from jax_moseq.utils import check_for_nans
+        >>> import jax.numpy as jnp
+        >>> nan_check = check_output(check_for_nans, 'NaNs detected')
+        >>> @nan_check
+        ... def func(a, b):
+        ...     return jnp.log(a), jnp.log(b)
+        >>> with checked_function_args() as args:
+        ...     func(1, 2)
+        ...     func(0, 2)
+        NaNs detected. Execution trace:
+        File "<module>", line 81, in <module>
+            func(0, 2)
+        >>> print(args)
+        {'func': ((0, 2), {})}
+
+    When multiple decorated functions occur within the same call stack,
+    the inputs to all of them are captured.::
+
+        >>> @nan_check
+        ... def func(a, b):
+        ...     return jnp.log(a), jnp.log(b)
+        >>> @nan_check
+        ... def caller_of_func(a, b):
+        ...     func(a, b)
+        >>> with checked_function_args() as args:
+        ...     caller_of_func(0, 2)
+        NaNs detected. Execution trace:
+        File "<module>", line 92, in <module>
+            caller_of_func(0, 2)
+        File "<module>", line 89, in caller_of_func
+            func(a, b)
+        >>> print(args)
+        {'func': ((0, 2), {}), 'caller_of_func': ((0, 2), {})}
+    """
     def __init__(self):
         self.inputs_dict = {}
         self.active = False
@@ -143,17 +193,17 @@ class checked_function_inputs:
 
     def __enter__(self):
         self.active = True
-        sys._checked_function_inputs = self
+        sys._checked_function_args = self
         self.exit_stack.enter_context(jax.disable_jit())
         return self.inputs_dict
 
     def __exit__(self, exc_type, exc_value, exc_traceback):
         self.active = False
-        del sys._checked_function_inputs
+        del sys._checked_function_args
         self.exit_stack.close()
 
         if isinstance(exc_value, CheckOutputsError):
-            print(exc_value)  # Print the exception message
+            print(exc_value, end='\n')  # Print the exception message
 
             # Extract the traceback and filter out frames from the 'wrapper'
             tb_frames = traceback.extract_tb(exc_traceback)
@@ -169,23 +219,47 @@ class checked_function_inputs:
             return True  # Suppress the exception from propagating further
         
 
-def check_output_decorator(check_outputs, message):
+def check_output(checker, error_message):
+    """
+    Creates a decorator that applies `checker` to the outputs of a function.
+
+    This decorator is intended to be used in conjunction with the
+    :py:class:`checked_function_args` context manager, and is only
+    active when the context manager is active. See 
+    :py:class:`checked_function_args` for example usage.
+
+    Parameters
+    ----------
+    checker : callable
+        A function that takes the outputs of the decorated function and 
+        returns a boolean value.
+
+    error_message : str
+        The error message to be displayed when raising a CheckOutputsError.
+
+    Returns
+    -------
+    decorator : callable
+        The generated decorator that checks the function output.
+    """
     def decorator(func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             try:
                 result = func(*args, **kwargs)
-                if not hasattr(sys, '_checked_function_inputs') or not sys._checked_function_inputs.active:
+                if not hasattr(sys, '_checked_function_args') or not sys._checked_function_args.active:
                     return result
 
-                if check_outputs(*result):
-                    sys._checked_function_inputs.inputs_dict[func.__name__] = (args, kwargs)
-                    raise CheckOutputsError("Stopping execution due to check_outputs condition being True.")
+                if checker(result):
+                    sys._checked_function_args.inputs_dict[func.__name__] = (args, kwargs)
+                    raise CheckOutputsError(error_message)
                 return result
             
             except CheckOutputsError as e:
-                if hasattr(sys, '_checked_function_inputs') and sys._checked_function_inputs.active:
-                    sys._checked_function_inputs.inputs_dict[func.__name__] = (args, kwargs)
+                if hasattr(sys, '_checked_function_args') and sys._checked_function_args.active:
+                    sys._checked_function_args.inputs_dict[func.__name__] = (args, kwargs)
                 raise e
         return wrapper
     return decorator
+
+nan_check = check_output(check_for_nans, 'NaNs detected')

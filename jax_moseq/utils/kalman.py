@@ -1,12 +1,11 @@
 import jax
 import jax.numpy as jnp
 import jax.random as jr
-
 from jax_moseq.utils.autoregression import get_nlags
-
+from jax_moseq.utils import nan_check
 na = jnp.newaxis
 
-
+@nan_check
 def kalman_filter(ys, mask, zs, m0, S0, A, B, Q, C, D, Rs):
     """
     Run a Kalman filter to produce the marginal likelihood and filtered state 
@@ -53,7 +52,7 @@ def kalman_filter(ys, mask, zs, m0, S0, A, B, Q, C, D, Rs):
     return filtered_ms, filtered_Ss
 
 
-
+@nan_check
 def kalman_sample(seed, ys, mask, zs, m0, S0, A, B, Q, C, D, Rs):
     
     # run the kalman filter

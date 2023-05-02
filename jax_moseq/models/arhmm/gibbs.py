@@ -2,7 +2,13 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 
-from jax_moseq.utils import pad_affine, psd_solve, psd_inv, convert_data_precision
+from jax_moseq.utils import (
+    pad_affine, 
+    psd_solve, 
+    psd_inv, 
+    nan_check,
+    convert_data_precision
+)
 
 from jax_moseq.utils.distributions import (
     sample_mniw,
@@ -57,7 +63,7 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, **kwargs):
         mask.astype(float)[:,nlags:])
     return convert_data_precision(z)
 
-
+@nan_check
 @partial(jax.jit, static_argnames=('num_states','nlags'))
 def resample_ar_params(seed, *, nlags, num_states, mask, x, z,
                        nu_0, S_0, M_0, K_0, **kwargs):
@@ -106,7 +112,7 @@ def resample_ar_params(seed, *, nlags, num_states, mask, x, z,
     Ab, Q = jax.lax.map(map_fun, (seeds, masks))
     return Ab, Q
 
-
+@nan_check
 @jax.jit
 def _resample_regression_params(x_in, x_out, nu_0, S_0, M_0, K_0, args):
     """
