@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 
-from jax_moseq.utils import apply_affine
+from jax_moseq.utils import apply_affine, nan_check
 from jax_moseq.utils.distributions import sample_scaled_inv_chi2
 from jax_moseq.utils.kalman import kalman_sample, ar_to_lds
 
@@ -10,7 +10,7 @@ from jax_moseq.models import arhmm
 
 na = jnp.newaxis
 
-
+@nan_check
 @jax.jit
 def resample_continuous_stateseqs(seed, Y, mask, z, s, Ab,
                                   Q, Cd, sigmasq, **kwargs):
