@@ -311,8 +311,8 @@ def resample_model(data, seed, states, params, hypparams,
         return model
     
     seed = model['seed']
-    params = model['params']
-    states = model['states']
+    params = model['params'].copy()
+    states = model['states'].copy()
     
     if not (states_only or skip_noise):
         params['sigmasq'] = resample_obs_variance(
