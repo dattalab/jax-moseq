@@ -193,6 +193,8 @@ def resample_model(data, seed, states, params, hypparams,
         updated seed, states, and parameters of the model.
     """
     seed = jr.split(seed)[1]
+    params = params.copy()
+    states = states.copy()
 
     if not states_only: 
         if verbose: print('Resampling pi (transition matrix)')
