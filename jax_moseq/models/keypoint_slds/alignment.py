@@ -121,8 +121,6 @@ def estimate_aligned(x, Cd, k):
     # Reshape keypoints
     batch_shape = x.shape[:-1]
     y = y.reshape(*batch_shape, k - 1, -1)
-
-    # Center
     Gamma = center_embedding(k) 
     return Gamma @ y
 

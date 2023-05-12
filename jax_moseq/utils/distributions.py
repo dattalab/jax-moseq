@@ -50,26 +50,27 @@ def sample_mniw(seed, nu, S, M, K):
     A = sample_mn(seed, M, sigma, K)
     return A, sigma
 
+
 def sample_hmm_stateseq(seed, transition_matrix, log_likelihoods, mask):
     """Sample state sequences in a Markov chain.
 
     Parameters
     ----------
-        seed: jax.random.PRNGKey
-            Random seed
-        transition_matrix: jax array, shape (num_states, num_states)
-            Transition matrix
-        log_likelihoods: jax array, shape (num_timesteps, num_states)
-            Sequence of log likelihoods of emissions given hidden state and parameters
-        mask: jax array, shape (num_timesteps,)
-            Sequence indicating whether to use an emission (1) or not (0)
+    seed: jax.random.PRNGKey
+        Random seed
+    transition_matrix: jax array, shape (num_states, num_states)
+        Transition matrix
+    log_likelihoods: jax array, shape (num_timesteps, num_states)
+        Sequence of log likelihoods of emissions given hidden state and parameters
+    mask: jax array, shape (num_timesteps,)
+        Sequence indicating whether to use an emission (1) or not (0)
 
     Returns
     -------
-        log_norm: float: 
-            Posterior marginal log likelihood
-        states: jax array, shape (num_timesteps,)
-            Sequence of sampled states
+    log_norm: float: 
+        Posterior marginal log likelihood
+    states: jax array, shape (num_timesteps,)
+        Sequence of sampled states
     """
 
     num_states = transition_matrix.shape[0]
