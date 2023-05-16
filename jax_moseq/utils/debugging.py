@@ -186,15 +186,17 @@ class checked_function_args:
         >>> print(args)
         {'func': ((0, 2), {}), 'caller_of_func': ((0, 2), {})}
     """
-    def __init__(self):
+    def __init__(self, disable_jit=True):
         self.inputs_dict = {}
         self.active = False
+        self.disable_jit = disable_jit
         self.exit_stack = contextlib.ExitStack()
 
     def __enter__(self):
         self.active = True
         sys._checked_function_args = self
-        self.exit_stack.enter_context(jax.disable_jit())
+        if self.disable_jit:
+            self.exit_stack.enter_context(jax.disable_jit())
         return self.inputs_dict
 
     def __exit__(self, exc_type, exc_value, exc_traceback):
