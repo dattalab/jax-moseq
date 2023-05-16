@@ -7,40 +7,13 @@ na = jnp.newaxis
 
 from jax_moseq.utils import pad_affine
 
-def steady_state_distribution(pi, pseudocount=1e-3):
-    """
-    Compute the steady state distribution of a Markov chain.
 
-    Parameters
-    ----------
-    pi : jax array of shape (num_states, num_states)
-        Transition matrix.
-    pseudocount : float, optional
-        Pseudocount to add to the transition matrix to make it regular.
-
-    Returns
-    -------
-    steady_state : jax array of shape (num_states,)
-        Steady state distribution.
-    """    
-    # make sure the matrix is regular and eigendecompose
-    pi = np.array(pi) # non-symmetric eigendecomposition only works on CPU
-    pi_regular = (pi + pseudocount)/(pi + pseudocount).sum(1)[:,None]
-    eigenvals, eigenvects = np.linalg.eig(pi_regular.T)
-
-    # extract the eigenvector corresponding to the eigenvalue with unit magnitude
-    index = np.argmin(np.abs(jnp.abs(eigenvals) - 1))
-    steady_state = np.real(eigenvects[:, index]) / np.sum(np.real(eigenvects[:, index]))
-    return jnp.array(steady_state)
-
-
-def generate_initial_state(seed, pi, Ab, Q):
+def generate_initial_state(seed, Ab, Q):
     """
     Generate initial states for the ARHMM.
 
-    Sample the initial state from the steady state distribution of the
-    transition matrix, and sample the initial latent trajectory from a
-    standard normal distribution.
+    Sample the initial discrete state from a uniform distribution
+    and sample the initial latent trajectory from a standard normal.
 
     Parameters
     ----------
@@ -62,16 +35,10 @@ def generate_initial_state(seed, pi, Ab, Q):
     seed : jax.random.PRNGKey
         Updated random seed.
     """
-    # sample initial discrete state
-    pi0 = steady_state_distribution(pi)
-    z = jr.choice(seed, jnp.arange(pi0.shape[0]), p=pi0)
-
-    # sample initial latent trajectory
+    z = jr.choice(seed, jnp.arange(Ab.shape[0]))
     latent_dim = Ab.shape[1]
     nlags = (Ab.shape[2]-1) // latent_dim
     xlags = jr.normal(seed, (nlags, latent_dim))
-
-    # update the seed
     seed = jr.split(seed)[1]
     return z, xlags, seed
 
@@ -188,7 +155,7 @@ def generate_states(seed, pi, Ab, Q, n_steps, init_state=None):
     """
     # initialize the states
     if init_state is None:
-        z, xlags, seed = generate_initial_state(seed, pi, Ab, Q)
+        z, xlags, seed = generate_initial_state(seed, Ab, Q)
     else: 
         z, xlags = init_state
         
