@@ -97,7 +97,7 @@ def estimate_coordinates(x, v, h, Cd, **kwargs):
 
 def estimate_aligned(x, Cd, k):
     """
-    Computed estimated positions of aligned keypoints
+    Compute estimated positions of aligned keypoints
     (i.e. prior to applying the rigid transform).
 
     Parameters
