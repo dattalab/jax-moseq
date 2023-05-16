@@ -53,11 +53,9 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, **kwargs):
         Discrete state sequences.
     """
     nlags = get_nlags(Ab)
-    num_samples = mask.shape[0]
-
     log_likelihoods = jax.lax.map(partial(ar_log_likelihood, x), (Ab, Q))
     _, z = jax.vmap(sample_hmm_stateseq, in_axes=(0,na,0,0))(
-        jr.split(seed, num_samples),
+        jr.split(seed, mask.shape[0]),
         pi,
         jnp.moveaxis(log_likelihoods,0,-1),
         mask.astype(float)[:,nlags:])
