@@ -373,7 +373,7 @@ def _check_init_args(data, states, params, hypparams,
     if not (data or (states and params)):
         raise ValueError('Must provide either `data` or '
                          'both `states` and `params`.')
-        
+            
     if not (hypparams or (trans_hypparams and
                           ar_hypparams and
                           obs_hypparams and
@@ -391,3 +391,13 @@ def _check_init_args(data, states, params, hypparams,
                                     posterior_idxs is None):
         raise ValueError('If `states` and `params` not provided, must '
                          'provide `anterior_idxs` and `posterior_idxs`.')
+    
+    if data is not None:
+        num_keypoints = data['Y'].shape[-2]
+        if ar_hypparams is None: 
+            ar_hypparams = hypparams['ar_hypparams']
+        latent_dim = ar_hypparams['latent_dim']
+
+        assert latent_dim <= (num_keypoints - 1)*2, \
+            '`latent_dim` must be <=(num_keypoints - 1)*2'
+        
