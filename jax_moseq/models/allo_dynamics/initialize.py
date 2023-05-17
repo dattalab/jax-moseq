@@ -43,6 +43,8 @@ def init_model(data=None,
                states=None,
                params=None,
                hypparams=None,
+               allo_hypparams=None,
+               trans_hypparams=None,
                seed=jr.PRNGKey(0),               
                verbose=False,
                **kwargs):
@@ -55,6 +57,9 @@ def init_model(data=None,
         seed = jr.PRNGKey(seed)
     model['seed'] = seed
 
+    if hypparams is None:
+        hypparams = {'allo_hypparams': allo_hypparams,
+                     'trans_hypparams': trans_hypparams}
     model['hypparams'] = hypparams
     
     if params is None:
