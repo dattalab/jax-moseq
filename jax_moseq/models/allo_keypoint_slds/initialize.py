@@ -23,7 +23,7 @@ def init_model(hypparams=None, allo_hypparams=None, seed=jr.PRNGKey(0), **kwargs
 
     (model['params']['delta_h'], model['params']['sigma_h'],
      model['params']['delta_v'], model['params']['sigma_v']
-    ) = init_allocentric_dynamics_params(seed, **hypparams['allo_hypparams'])
+    ) = init_allocentric_dynamics_params(seed, **model['hypparams']['allo_hypparams'])
     
     return model
 
