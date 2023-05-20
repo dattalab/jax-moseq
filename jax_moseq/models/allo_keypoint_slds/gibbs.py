@@ -313,10 +313,10 @@ def resample_model(data, seed, states, params, hypparams,
             seed, **data, **states, **params, 
             **hypparams['trans_hypparams'])
 
-        # if verbose: print('Resampling Ab,Q (AR parameters)')
-        # params['Ab'], params['Q']= arhmm.resample_ar_params(
-        #     seed, **data, **states, **params, 
-        #     **hypparams['ar_hypparams'])
+        if verbose: print('Resampling Ab,Q (AR parameters)')
+        params['Ab'], params['Q']= arhmm.resample_ar_params(
+            seed, **data, **states, **params, 
+            **hypparams['ar_hypparams'])
         
         if verbose: print('Resampling allocentric dynamics')
         (params['delta_h'], params['sigma_h'],
@@ -330,25 +330,25 @@ def resample_model(data, seed, states, params, hypparams,
 
     if not ar_only:
 
-        # if not (states_only or skip_noise):
-        #     if verbose: print('Resampling sigmasq (global noise scales)')
-        #     params['sigmasq'] = keypoint_slds.resample_obs_variance(
-        #         seed, **data, **states, **params, 
-        #         s_0=noise_prior, **hypparams['obs_hypparams'])
+        if not (states_only or skip_noise):
+            if verbose: print('Resampling sigmasq (global noise scales)')
+            params['sigmasq'] = keypoint_slds.resample_obs_variance(
+                seed, **data, **states, **params, 
+                s_0=noise_prior, **hypparams['obs_hypparams'])
 
-        # if verbose: print('Resampling x (continuous latent states)')
-        # states['x'] = keypoint_slds.resample_continuous_stateseqs(
-        #     seed, **data, **states, **params)
+        if verbose: print('Resampling x (continuous latent states)')
+        states['x'] = keypoint_slds.resample_continuous_stateseqs(
+            seed, **data, **states, **params)
         
         if verbose: print('Resampling centroid and heading')
         states['h'],states['v'] = resample_heading_and_centroid(
             seed, **data, **states, **params, **hypparams['allo_hypparams'])
         
-        # if not skip_noise:
-        #     if verbose: print('Resampling s (local noise scales)')
-        #     states['s'] = keypoint_slds.resample_scales(
-        #         seed, **data, **states, **params, 
-        #         s_0=noise_prior, **hypparams['obs_hypparams'])
+        if not skip_noise:
+            if verbose: print('Resampling s (local noise scales)')
+            states['s'] = keypoint_slds.resample_scales(
+                seed, **data, **states, **params, 
+                s_0=noise_prior, **hypparams['obs_hypparams'])
 
     return {'seed': seed,
             'states': states, 
