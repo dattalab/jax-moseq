@@ -13,10 +13,9 @@ from jax_moseq.utils import nan_check
 na = jnp.newaxis
 
 def kalman_sample(seed, ys, mask, zs, m0, S0, A, B, Q, C, D, Rs,
-                  masked_dynamics_params, masked_obs_noise):
+                  masked_dynamics_params, masked_obs_noise, jitter=0):
     """Run forward-filtering and backward-sampling to draw samples from posterior
-    of a 1st-order dynamic system with L'th order autoregressive dynamics. This
-    dimensionality is referred to as `ar_dim` = `latent_dim * lag_order` = D * L.
+    of a 1st-order dynamic system with autoregressive dynamics of order `n_lags`. 
     
     Parameters
     ----------
@@ -25,7 +24,7 @@ def kalman_sample(seed, ys, mask, zs, m0, S0, A, B, Q, C, D, Rs,
         Continuous observations, minus first L+1 frames.
     mask: jax.Array with shape (T,)
         Indicator of observation validity, for timesteps [L-1, T)
-    zs: jax.Array with shape (n_timesteps-n_lags,)
+    zs: jax.Array with shape (T-n_lags,)
         Discrete state sequence, taking integer values [1, n_states).
     mu0: jax.Array with shape (ar_dim,)
         Initial continuous state mean
@@ -50,11 +49,14 @@ def kalman_sample(seed, ys, mask, zs, m0, S0, A, B, Q, C, D, Rs,
         Dynamics parameters, for masked timesteps
     masked_obs_noise: jax.Array with shape (obs_dim,)
         Diagonal observation noise scale, for masked timesteps.
+    jitter : float, default=0
+        Amount to boost the diagonal of the covariance matrix
+        during backward-sampling of the continuous states.
 
     Returns
     -------
     xs: jax.Array with shape (T, ar_dim)
-
+        Sampled continuous state sequence.
     """
 
     ar_dim, obs_dim = A.shape[-1], Rs.shape[-1]
@@ -94,8 +96,7 @@ def kalman_sample(seed, ys, mask, zs, m0, S0, A, B, Q, C, D, Rs,
     params = ParamsLGSSM(
         initial=initial_params, dynamics=dynamics_params, emissions=emissions_params,
     )
-
-    return lgssm_posterior_sample(seed, params, ys)
+    return lgssm_posterior_sample(seed, params, ys, jitter=jitter)
 
 
 def ar_to_lds(Ab, Q, Cd=None):
