@@ -1,19 +1,17 @@
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+from functools import partial
 
-from jax_moseq.utils import apply_affine, nan_check
-from jax_moseq.utils.distributions import sample_scaled_inv_chi2
 from jax_moseq.utils.kalman import kalman_sample, ar_to_lds
 
 from jax_moseq.models import arhmm
 
 na = jnp.newaxis
 
-@nan_check
 @jax.jit
-def resample_continuous_stateseqs(seed, y, mask, z, s, Ab,
-                                  Q, Cd, sigmasq, **kwargs):
+def resample_continuous_stateseqs(seed, y, mask, z, s, Ab, Q, 
+                                  Cd, sigmasq, jitter=1e-3, **kwargs):
     """Resample the latent trajectories `x`.
 
     Parameters
@@ -37,6 +35,9 @@ def resample_continuous_stateseqs(seed, y, mask, z, s, Ab,
         Affine transform from `latent_dim` to `state_dim`
     sigmasq : jax.Array of shape (obs_dim,)
         Unscaled noise.
+    jitter : float, default=1e-3
+        Amount to boost the diagonal of the covariance matrix
+        during backward-sampling of the continuous states.
     **kwargs : dict
         Overflow, for convenience.
 
@@ -96,7 +97,7 @@ def resample_continuous_stateseqs(seed, y, mask, z, s, Ab,
     #   Rs:     (n_timesteps-n_lags+1, obs_dim)
     # ==================================================
     in_axes = (0, 0, 0, 0, na, na, na, na, na, na, na, 0, na, na)
-    x = jax.vmap(kalman_sample, in_axes)(
+    x = jax.vmap(partial(kalman_sample, jitter=jitter), in_axes)(
         jr.split(seed, n_sessions), y_, mask_, z,
         init_dynamics_mean, init_dynamics_cov,
         A_, b_, Q_, C_, d_, R_,

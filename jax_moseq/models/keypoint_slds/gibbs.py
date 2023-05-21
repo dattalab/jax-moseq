@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import jax.random as jr
 
 from jax_moseq.utils.kalman import kalman_sample
-from jax_moseq.utils.distributions import sample_vonmises_fisher, sample_scaled_inv_chi2
+from jax_moseq.utils.distributions import sample_vonmises_fisher
 
 from jax_moseq.models import arhmm, slds
 from jax_moseq.models.keypoint_slds.alignment import (
@@ -18,8 +18,8 @@ na = jnp.newaxis
 
 
 @jax.jit
-def resample_continuous_stateseqs(seed, Y, mask, v, h, s, z,
-                                  Cd, sigmasq, Ab, Q, **kwargs):
+def resample_continuous_stateseqs(seed, Y, mask, v, h, s, z, Cd,
+                                  sigmasq, Ab, Q, jitter=1e-3, **kwargs):
     """
     Resamples the latent trajectories ``x``.
 
@@ -47,6 +47,9 @@ def resample_continuous_stateseqs(seed, Y, mask, v, h, s, z,
         Autoregressive transforms.
     Q : jax array of shape (num_states, latent_dim, latent_dim)
         Autoregressive noise covariances.
+    jitter : float, default=1e-3
+        Amount to boost the diagonal of the covariance matrix
+        during backward-sampling of the continuous states.
     **kwargs : dict
         Overflow, for convenience.
 
@@ -56,8 +59,8 @@ def resample_continuous_stateseqs(seed, Y, mask, v, h, s, z,
         Latent trajectories.
     """
     Y, s, Cd, sigmasq = to_vanilla_slds(Y, v, h, s, Cd, sigmasq)
-    x = slds.resample_continuous_stateseqs(seed, Y, mask, z, s,
-                                           Ab, Q, Cd, sigmasq)
+    x = slds.resample_continuous_stateseqs(
+        seed, Y, mask, z, s, Ab, Q, Cd, sigmasq, jitter=jitter)
     return x
 
 
@@ -304,7 +307,7 @@ def resample_location(seed, Y, mask, x, h, s, Cd,
 def resample_model(data, seed, states, params, hypparams,
                    noise_prior, ar_only=False, states_only=False,
                    skip_noise=False, fix_heading=False, verbose=False,
-                   **kwargs):
+                   jitter=1e-3, **kwargs):
     """
     Resamples the Keypoint SLDS model given the hyperparameters,
     data, noise prior, current states, and current parameters.
@@ -331,6 +334,9 @@ def resample_model(data, seed, states, params, hypparams,
         Whether to exclude ``sigmasq`` and ``s`` from resampling.
     fix_heading : bool, default=False
         Whether to exclude ``h`` from resampling.
+    jitter : float, default=1e-3
+        Amount to boost the diagonal of the covariance matrix
+        during backward-sampling of the continuous states.
     verbose : bool, default=False
         Whether to print progress info during resampling.
 
@@ -358,7 +364,7 @@ def resample_model(data, seed, states, params, hypparams,
 
     if verbose: print('Resampling x (continuous latent states)')
     states['x'] = resample_continuous_stateseqs(
-        seed, **data, **states, **params)
+        seed, **data, **states, **params, jitter=jitter)
 
     if not fix_heading:
         if verbose: print('Resampling h (heading)')
