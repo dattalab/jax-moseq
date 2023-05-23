@@ -77,6 +77,6 @@ def sample_hmm_stateseq(seed, transition_matrix, log_likelihoods, mask):
     initial_distribution = jnp.ones(num_states)/num_states
 
     masked_log_likelihoods = log_likelihoods * mask[:,None]
-    z,L = hmm_posterior_sample(seed, initial_distribution, transition_matrix, masked_log_likelihoods)
+    L,z = hmm_posterior_sample(seed, initial_distribution, transition_matrix, masked_log_likelihoods)
     z = convert_data_precision(z)
-    return z,L
+    return L,z
