@@ -7,7 +7,6 @@ from jax_moseq.utils import (
     psd_solve, 
     psd_inv, 
     nan_check,
-    convert_data_precision
 )
 
 from jax_moseq.utils.distributions import (
@@ -61,7 +60,7 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, **kwargs):
         pi,
         jnp.moveaxis(log_likelihoods,0,-1),
         mask.astype(float)[:,nlags:])
-    return convert_data_precision(z)
+    return z
 
 @nan_check
 @partial(jax.jit, static_argnames=('num_states','nlags'))
