@@ -2,7 +2,6 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 from functools import partial
-from jaxopt import GaussNewton
 na = jnp.newaxis
 
 from jax_moseq.utils import convert_data_precision, nan_check
