@@ -19,7 +19,8 @@ na = jnp.newaxis
 
 @jax.jit
 def resample_continuous_stateseqs(seed, Y, mask, v, h, s, z, Cd,
-                                  sigmasq, Ab, Q, jitter=1e-3, **kwargs):
+                                  sigmasq, Ab, Q, jitter=1e-3, 
+                                  **kwargs):
     """
     Resamples the latent trajectories ``x``.
 

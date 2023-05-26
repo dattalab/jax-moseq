@@ -2,13 +2,14 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 from functools import partial
-na = jnp.newaxis
+import tensorflow_probability.substrates.jax.distributions as tfd
 
 from jax_moseq.utils import convert_data_precision, nan_check
 from jax_moseq.utils.transitions import resample_hdp_transitions
 from jax_moseq.models.keypoint_slds import angle_to_rotation_matrix
 from jax_moseq.utils.distributions import sample_inv_gamma, sample_hmm_stateseq
 
+na = jnp.newaxis
 
 
 def wrap_angle(x):
@@ -80,6 +81,7 @@ def resample_centroid_dynamics(seed, mask, dv, alpha0_v, beta0_v, lambda0_v):
     delta_v = jr.normal(seed, (2,))*sigma_v/lambda_post + mu_post
     return delta_v, sigma_v
 
+
 @partial(jax.jit, static_argnames='num_states')
 def resample_allocentric_dynamics_params(
         seed, *, mask, v, h, z, alpha0_h, beta0_h, lambda0_h,
@@ -139,12 +141,11 @@ def resample_allocentric_dynamics_params(
 @jax.jit
 def allo_log_likelihood(h, v, delta_h, sigma_h, delta_v, sigma_v):
     dh,dv = compute_delta_heading_centroid(h, v)
-    log_likelihood = (
-        -0.5 * (dh - delta_h)**2 / sigma_h**2 
-        -jnp.log(sigma_h * jnp.sqrt(2*jnp.pi))
-        -0.5 * ((dv - delta_v)**2).sum(-1) / sigma_v**2
-        -jnp.log(sigma_v * jnp.sqrt(2*jnp.pi))*2)
-    return log_likelihood
+    ll = tfd.Normal(delta_h, sigma_h).log_prob(dh)
+    sigma_v = jnp.broadcast_to(sigma_v[...,na], delta_v.shape)
+    ll += tfd.MultivariateNormalDiag(delta_v, sigma_v).log_prob(dv)
+    return ll
+
 
 
 

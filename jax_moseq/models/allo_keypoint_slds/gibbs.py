@@ -3,6 +3,7 @@ import jax.numpy as jnp
 import jax.random as jr
 from functools import partial
 na = jnp.newaxis
+import time
 
 from jax_moseq.models import keypoint_slds, arhmm, allo_dynamics
 from jax_moseq.utils import convert_data_precision
@@ -93,50 +94,9 @@ def resample_allocentric_dynamics_params(seed, *, mask, v, h, Ab, num_states, **
     return allo_dynamics.resample_allocentric_dynamics_params(
         seed, mask=mask[...,nlags-1:], v=v[...,nlags-1:,:], 
         h=h[...,nlags-1:], num_states=num_states, **kwargs)
-    
 
-''' 
-# TOO SLOW - NOT USED
-def MAP_heading_and_centroid(mask, Y, Y_bar, h, v, obs_variance, 
-                             delta_h, sigma_h, delta_v, sigma_v):
-    """
-    Compute the MAP estimate of heading and centroid using least squares.
-    """
-    def residual_fun(hv):
 
-        # dynamics
-        h,v = hv[:,0], hv[:,1:]
-        dh,dv = compute_delta_heading_centroid(h, v)
-        heading_residuals = (dh - delta_h) * mask[:-1] / sigma_h
-        centroid_residuals = (dv - delta_v) * mask[:-1,na] / sigma_v[:,na]
-
-        # observations
-        Y_pred = apply_rotation(Y_bar, h) + v[:,na,:]
-        obs_residuals = (Y - Y_pred) / obs_variance[...,na]
-        obs_residuals = obs_residuals.reshape(-1,Y.shape[-2]*2) * mask[...,na]
-
-        # confine heading to [-pi, pi]
-        confinement_residuals = jnp.maximum(0, jnp.abs(h) - jnp.pi)
-
-        # weakly regularize masked timepoints
-        regularization_residuals = 1e-3 * (1-mask[...,na]) * hv
-
-        return jnp.concatenate([
-            heading_residuals.flatten(),
-            centroid_residuals.flatten(),
-            obs_residuals.flatten(),
-            confinement_residuals.flatten(),
-            regularization_residuals.flatten()
-        ], axis=-1)
-
-    hv_init = jnp.concatenate([h[...,na], v], axis=-1)
-    gn = GaussNewton(residual_fun=residual_fun)
-    hv_opt = gn.run(hv_init).params * mask[...,na]
-    h_opt, v_opt = hv_opt[:,0], hv_opt[:,1:]
-    return wrap_angle(h_opt), v_opt
-'''
-
-def perturb_heading_and_centroid(seed, mask, Y, Y_bar, h_opt, v_opt, obs_variance,
+def perturb_heading_and_centroid(seed, mask, Y, Y_bar, obs_variance,
                                  delta_h, sigma_h, delta_v, sigma_v):
     """
     Use an extended Kalman filter to perturb the heading and centroid
@@ -166,13 +126,13 @@ def perturb_heading_and_centroid(seed, mask, Y, Y_bar, h_opt, v_opt, obs_varianc
     emission_covariance *= mask[...,na,na] 
     emission_covariance += 1e3*(1-mask[...,na,na])*jnp.eye(Ytarg.shape[-1])[na,:,:]
     
-    dynamics_covariance = jnp.vstack([sigma_h, sigma_v, sigma_v]).T[:,:,na]*jnp.eye(3)[na,:,:]
+    dynamics_covariance = jnp.vstack([sigma_h**2, sigma_v**2, sigma_v**2]).T[:,:,na]*jnp.eye(3)[na,:,:]
     dynamics_covariance *= mask[...,1:,na,na] 
     dynamics_covariance += 1e-6*(1-mask[...,1:,na,na])*jnp.eye(3)[na,:,:]
         
     params = ParamsNLGSSM(
-        initial_mean=jnp.concatenate([h_opt[:1], v_opt[0]]),
-        initial_covariance=jnp.eye(3),
+        initial_mean=jnp.concatenate([0, Y[0].mean(0)]),
+        initial_covariance=jnp.eye(3)*1e4,
         dynamics_function=dynamics_function,
         dynamics_covariance=dynamics_covariance,
         emission_function=emission_function,
@@ -180,12 +140,12 @@ def perturb_heading_and_centroid(seed, mask, Y, Y_bar, h_opt, v_opt, obs_varianc
     
     hv = extended_kalman_posterior_sample(
         seed, params, Ytarg, jnp.arange(len(mask)))
-    h, v = wrap_angle(hv[:,0]), hv[:,1:]
+    h, v = hv[:,0], hv[:,1:]
     return h, v
 
 
 @jax.jit
-def resample_heading_and_centroid(seed, mask, Y, h, v, x, z, s, Cd, sigmasq, 
+def resample_heading_and_centroid(seed, mask, Y, x, z, s, Cd, sigmasq, 
                                   delta_h, sigma_h, delta_v, sigma_v, 
                                   sigmasq_height=1, **kwargs):
     """
@@ -199,10 +159,6 @@ def resample_heading_and_centroid(seed, mask, Y, h, v, x, z, s, Cd, sigmasq,
         Mask of valid observations.
     Y : jax array of shape (N, T, k, d)
         Keypoint observations.
-    h : jax array of shape (N, T)
-        Current heading angles (for initialization).
-    v : jax array of shape (N, T, d)
-        Current centroid positions (for initialization).
     x : jax array of shape (N, T, latent_dim)
         Latent trajectories.
     z : jax array of shape (N, T)
@@ -239,21 +195,12 @@ def resample_heading_and_centroid(seed, mask, Y, h, v, x, z, s, Cd, sigmasq,
     z = jnp.concatenate([z_padding, z], axis=-1)
 
     obs_variance = sigmasq * s
-    k = Y.shape[-2]
-    Y_bar = estimate_aligned(x, Cd, k)[...,:2]
-    
-    '''
-    # SKIPPING - TOO SLOW
-    # compute the MAP estimate of heading and centroid
-    # h_opt, v_opt = jax.vmap(MAP_heading_and_centroid)(
-    #     mask, Y[...,:2], Y_bar, h, v[...,:2], obs_variance, 
-    #     delta_h[z], sigma_h[z], delta_v[z], sigma_v[z])
-    '''
+    Y_bar = estimate_aligned(x, Cd, Y.shape[-2])[...,:2]
 
     # perturb the MAP estimate using an extended Kalman sampler
     seeds = jr.split(seed, Y.shape[0])
     h,v = jax.vmap(perturb_heading_and_centroid)(
-        seeds, mask, Y[...,:2], Y_bar, h, v, obs_variance, 
+        seeds, mask, Y[...,:2], Y_bar, obs_variance, 
         delta_h[z], sigma_h[z], delta_v[z], sigma_v[z])
 
     # if the keypoints are 3D, then resample the height
@@ -267,9 +214,9 @@ def resample_heading_and_centroid(seed, mask, Y, h, v, x, z, s, Cd, sigmasq,
 
 
 
-def resample_model(data, seed, states, params, hypparams,
-                   noise_prior, ar_only=False, states_only=False,
-                   skip_noise=False, verbose=False, **kwargs):
+def resample_model(data, seed, states, params, hypparams, noise_prior, 
+                   ar_only=False, states_only=False, skip_noise=False, 
+                   verbose=False, jitter=0, **kwargs):
     """
     Resamples the allocentric keypoint SLDS model.
 
@@ -293,6 +240,9 @@ def resample_model(data, seed, states, params, hypparams,
         Whether to restrict sampling to states.
     skip_noise : bool, default=False
         Whether to exclude ``sigmasq`` and ``s`` from resampling.
+    jitter : float, default=1e-3
+        Amount to boost the diagonal of the covariance matrix
+        during backward-sampling of the continuous states.
     verbose : bool, default=False
         Whether to print progress info during resampling.
 
@@ -305,13 +255,14 @@ def resample_model(data, seed, states, params, hypparams,
     seed = jr.split(seed)[1]
     params = params.copy()
     states = states.copy()
-
+    
     if not states_only: 
+        
         if verbose: print('Resampling pi (transition matrix)')
         params['betas'], params['pi'] = arhmm.resample_hdp_transitions(
             seed, **data, **states, **params, 
             **hypparams['trans_hypparams'])
-
+        
         if verbose: print('Resampling Ab,Q (AR parameters)')
         params['Ab'], params['Q']= arhmm.resample_ar_params(
             seed, **data, **states, **params, 
@@ -334,10 +285,10 @@ def resample_model(data, seed, states, params, hypparams,
             params['sigmasq'] = keypoint_slds.resample_obs_variance(
                 seed, **data, **states, **params, 
                 s_0=noise_prior, **hypparams['obs_hypparams'])
-
+        
         if verbose: print('Resampling x (continuous latent states)')
         states['x'] = keypoint_slds.resample_continuous_stateseqs(
-            seed, **data, **states, **params)
+            seed, **data, **states, **params, jitter=jitter)
         
         if verbose: print('Resampling centroid and heading')
         states['h'],states['v'] = resample_heading_and_centroid(
