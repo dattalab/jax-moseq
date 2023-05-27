@@ -3,7 +3,10 @@ import jax.numpy as jnp
 import jax.random as jr
 from functools import partial
 
-from jax_moseq.utils.kalman import kalman_sample, ar_to_lds
+from jax_moseq.utils.kalman import (
+    kalman_sample, 
+    ar_to_lds_dynamics, 
+    ar_to_lds_emissions)
 
 from jax_moseq.models import arhmm
 
@@ -22,13 +25,13 @@ def resample_continuous_stateseqs(seed, y, mask, z, s, Ab, Q,
         Observations.
     mask : jax.Array of shape (n_sessions, n_timesteps)
         Binary indicator, 1=valid frames, 0=invalid frames.
-    z : jax.Array of shape (n_sessions, n_timesteps-n_lags)
+    z : jax.Array of shape (n_sessions, n_timesteps-nlags)
         Discrete state sequences, taking integer values between [0, n_states),
-        for timesteps [n_lags, n_timesteps),
+        for timesteps [nlags, n_timesteps),
     s : jax.Array of shape (n_sessions, n_timesteps, obs_dim)
         Observation noise scales.
     Ab : jax.Array of shape (n_states, latent_dim, ar_dim + 1)
-        Autoregressive dynamics and bias, where `ar_dim = latent_dim * n_lags`
+        Autoregressive dynamics and bias, where `ar_dim = latent_dim * nlags`
     Q : jax.Array of shape (n_states, latent_dim, latent_dim)
         Autoregressive noise covariances.
     Cd : jax.Array of shape (obs_dim, latent_dim + 1)
@@ -48,32 +51,30 @@ def resample_continuous_stateseqs(seed, y, mask, z, s, Ab, Q,
     """
 
     n_sessions, latent_dim, obs_dim = y.shape[0], Ab.shape[1], y.shape[-1]
-    n_lags = Ab.shape[2] // latent_dim
+    nlags = Ab.shape[2] // latent_dim
+
 
     # TODO Parameterize these distributional hyperparameter
-    init_dynamics_mean = jnp.zeros(latent_dim * n_lags)
-    init_dynamics_cov = 10 * jnp.eye(latent_dim * n_lags) # TODO: hard coded constant 10
+    m0 = jnp.zeros(latent_dim * nlags)
+    S0 = 10 * jnp.eye(latent_dim * nlags) # TODO: hard coded constant 10
     masked_dynamics_noise = 10
     masked_obs_noise = 10
-        
-    # =====================================================================
-    # 1. Omit the first L frames of observations and associated sequences
-    # =====================================================================
-    y_ = y[:, n_lags-1:]
-    mask_ = mask[:, n_lags-1:]
-    
-    # Scale unscaled observations by fitted diagonal scales
-    R_ = sigmasq * s[:, n_lags-1:]
     
     # ==========================================================================
-    # 2. Reformat L'th-order AR dynamics in R^D to 1st-order dynamics in R^{DL}
+    # 1. Reformat L'th-order AR dynamics in R^D to 1st-order dynamics in R^{DL}
     # ==========================================================================
-    A_, b_, Q_, C_, d_ = ar_to_lds(Ab, Q, Cd)   
+    C_, d_, R_, y_, m0_, S0_ = jax.vmap(
+        ar_to_lds_emissions, in_axes=(na,0,0,na,na,na)
+    )(Cd, sigmasq*s, y, m0, S0, nlags)
+    
+    A_, b_, Q_ = ar_to_lds_dynamics(Ab, Q)
+    
+    mask_ = mask[:, nlags-1:]
     
     # =============================================
-    # 3. Formulate parameters for masked timesteps
+    # 2. Formulate parameters for masked timesteps
     # =============================================
-    ar_dim = latent_dim*n_lags
+    ar_dim = latent_dim*nlags
 
     # If masked, hold the last state, i.e. set dynamics for "unlagged" states to
     # identity matrix and all other state dynamics to 0
@@ -83,32 +84,30 @@ def resample_continuous_stateseqs(seed, y, mask, z, s, Ab, Q,
     masked_dynamics_params = {
         'weights': eye_zero_order,
         'bias': jnp.zeros(ar_dim),
-        'cov': jnp.eye(ar_dim) * masked_dynamics_noise,
-    }
+        'cov': jnp.eye(ar_dim) * masked_dynamics_noise}
 
     masked_obs_noise_diag = jnp.ones(obs_dim) * masked_obs_noise
 
     # ==================================================
-    # 4. Apply vectorized Kalman sample to each session
+    # 3. Apply vectorized Kalman sample to each session
     # Shapes of time-varying parameters going into the Kalman sampler are
-    #   ys:     (n_timesteps-n_lags+1, obs_dim), corresponding to timesteps  [L-1, T)
-    #   mask:   (n_timesteps-n_lags+1,)
-    #   zs:     (n_timesteps-n_lags,), corresponding to timesteps [L, T]
-    #   Rs:     (n_timesteps-n_lags+1, obs_dim)
+    #   ys:     (n_timesteps-nlags+1, obs_dim), corresponding to timesteps  [L-1, T)
+    #   mask:   (n_timesteps-nlags+1,) 
+    #   zs:     (n_timesteps-nlags,), corresponding to timesteps [L, T]
+    #   Rs:     (n_timesteps-nlags+1, obs_dim)
     # ==================================================
-    in_axes = (0, 0, 0, 0, na, na, na, na, na, na, na, 0, na, na)
+
+    in_axes = (0, 0, 0, 0, 0, 0, na, na, na, na, na, 0, na, na)
     x = jax.vmap(partial(kalman_sample, jitter=jitter), in_axes)(
         jr.split(seed, n_sessions), y_, mask_, z,
-        init_dynamics_mean, init_dynamics_cov,
-        A_, b_, Q_, C_, d_, R_,
-        masked_dynamics_params, masked_obs_noise_diag
-    )
+        m0_, S0_, A_, b_, Q_, C_, d_, R_,
+        masked_dynamics_params, masked_obs_noise_diag)
 
     # =========================================================================
-    # 5. Reformat sampled trajectories back into L'th order AR dynamics in R^D
+    # 4. Reformat sampled trajectories back into L'th order AR dynamics in R^D
     # =========================================================================
     x = jnp.concatenate([
-            x[:, 0, :(n_lags-1)*latent_dim].reshape(-1, n_lags-1, latent_dim),
+            x[:, 0, :(nlags-1)*latent_dim].reshape(-1, nlags-1, latent_dim),
             x[:,:,-latent_dim:]
         ], axis=1)
     

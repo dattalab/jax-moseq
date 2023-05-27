@@ -1,15 +1,13 @@
 import jax
 import jax.numpy as jnp
-import jax.random as jr
-
 from dynamax.linear_gaussian_ssm.inference import (lgssm_posterior_sample,
+                                                   _condition_on,
                                                    ParamsLGSSM,
                                                    ParamsLGSSMInitial,
                                                    ParamsLGSSMDynamics,
-                                                   ParamsLGSSMEmissions,)
+                                                   ParamsLGSSMEmissions)
 
 from jax_moseq.utils.autoregression import get_nlags
-from jax_moseq.utils import nan_check
 na = jnp.newaxis
 
 def kalman_sample(seed, ys, mask, zs, m0, S0, A, B, Q, C, D, Rs,
@@ -99,10 +97,69 @@ def kalman_sample(seed, ys, mask, zs, m0, S0, A, B, Q, C, D, Rs,
     return lgssm_posterior_sample(seed, params, ys, jitter=jitter)
 
 
-def ar_to_lds(Ab, Q, Cd=None):
+
+
+
+def ar_to_lds_emissions(Cd, R, y, m0, S0, nlags):
     """
     Given a linear dynamical system with L'th-order autoregressive 
-    dynamics in R^D, returns a system with 1st-order dynamics in R^(D*L)
+    dynamics in R^D, returns the emission terms and initia state 
+    distribution for a system with 1st-order dynamics in R^(D*L)
+    
+    Parameters
+    ----------  
+    Cd: jax array, shape (D_obs, D+1)
+        Observation affine transformation
+    R:  jax array, shape (T, D_obs)
+        Dimension-wise observation covariances
+    y:  jax array, shape (T, D_obs)
+        Observations
+    m0: jax array, shape (D)
+        Initial state distribution mean
+    S0: jax array, shape (D, D)
+        Initial state distribution cov
+    nlags: Number of autoregressive lags
+    
+    Returns
+    -------
+    C_: jax array, shape (D_obs, D*L)
+    d_: jax array, shape (D_obs)
+    R_: jax array, shape (T, D_obs)
+    y_: jax array, shape (T, D_obs)
+    m0_: jax array, shape (D*L)
+    S0_: jax array, shape (D*L, D*L)
+    """
+    obs_dim = y.shape[-1]
+    latent_dim = Cd.shape[-1]-1
+    lds_dim = latent_dim * nlags
+    
+    C = Cd[:,:-1]
+    C_ = jnp.zeros((obs_dim, lds_dim))
+    C_ = C_.at[:,-latent_dim:].set(C)
+    d_ = Cd[:,-1]
+    
+    R_ = R[nlags-1:]
+    y_ = y[nlags-1:]
+    
+    C0 = jnp.zeros((obs_dim*(nlags-1),lds_dim))
+    for l in range(nlags-1):
+        C0 = C0.at[l*obs_dim:(l+1)*obs_dim, l*latent_dim:(l+1)*latent_dim].set(C)
+    d0 = jnp.tile(d_, (nlags-1,))
+    D0 = jnp.zeros((obs_dim*(nlags-1),2))
+    u0 = jnp.zeros(2,)
+    R0 = jnp.diag(R[:nlags-1,:].reshape(-1))
+    y0 = y[:nlags-1,:].reshape(-1)
+    m0_,S0_ = _condition_on(m0,S0,C0,D0,d0,R0,u0,y0)
+
+    return C_, d_, R_, y_, m0_, S0_
+
+            
+        
+def ar_to_lds_dynamics(Ab, Q):
+    """
+    Given a linear dynamical system with L'th-order autoregressive 
+    dynamics in R^D, returns the dynamics terms for a system with 
+    1st-order dynamics in R^(D*L)
     
     Parameters
     ----------  
@@ -110,16 +167,12 @@ def ar_to_lds(Ab, Q, Cd=None):
         AR affine transform
     Q: jax array, shape (..., D, D)
         AR noise covariance
-    Cd: jax array, shape (..., D_obs, D+1)
-        Observation affine transformation
-    
+
     Returns
     -------
     A_: jax array, shape (..., D*L, D*L)
     b_: jax array, shape (..., D*L)    
     Q_: jax array, shape (..., D*L, D*L)  
-    C_: jax array, shape (..., D_obs, D*L)
-    d_: jax array, shape (..., D_obs)
     """    
     nlags = get_nlags(Ab)
     latent_dim = Ab.shape[-2]
@@ -141,13 +194,4 @@ def ar_to_lds(Ab, Q, Cd=None):
     Q_ = Q_.at[..., :-latent_dim, :-latent_dim].set(eye * 1e-2)
     Q_ = Q_.at[..., -latent_dim:, -latent_dim:].set(Q)
     
-    if Cd is None:
-        return A_, b_, Q_
-    
-    C = Cd[..., :-1]
-    C_ = jnp.zeros((*C.shape[:-1], lds_dim))
-    C_ = C_.at[..., -latent_dim:].set(C)
-
-    d_ = Cd[..., -1]
-
-    return A_, b_, Q_, C_, d_
+    return A_, b_, Q_
