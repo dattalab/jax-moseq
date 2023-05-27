@@ -124,14 +124,14 @@ def perturb_heading_and_centroid(seed, mask, Y, Y_bar, obs_variance,
     emission_covariance = jnp.repeat(obs_variance,2,axis=-1)[:,:,na]
     emission_covariance *= jnp.eye(Ytarg.shape[-1])[na,:,:]
     emission_covariance *= mask[...,na,na] 
-    emission_covariance += 1e3*(1-mask[...,na,na])*jnp.eye(Ytarg.shape[-1])[na,:,:]
+    emission_covariance += 1e-2*(1-mask[...,na,na])*jnp.eye(Ytarg.shape[-1])[na,:,:]
     
     dynamics_covariance = jnp.vstack([sigma_h**2, sigma_v**2, sigma_v**2]).T[:,:,na]*jnp.eye(3)[na,:,:]
     dynamics_covariance *= mask[...,1:,na,na] 
-    dynamics_covariance += 1e-6*(1-mask[...,1:,na,na])*jnp.eye(3)[na,:,:]
+    dynamics_covariance += 1e8*(1-mask[...,1:,na,na])*jnp.eye(3)[na,:,:]
         
     params = ParamsNLGSSM(
-        initial_mean=jnp.concatenate([0, Y[0].mean(0)]),
+        initial_mean=jnp.concatenate([jnp.zeros(1), Y[0].mean(0)]),
         initial_covariance=jnp.eye(3)*1e4,
         dynamics_function=dynamics_function,
         dynamics_covariance=dynamics_covariance,
