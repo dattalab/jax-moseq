@@ -1,10 +1,10 @@
 import jax
 from jax_moseq.models.arhmm import discrete_stateseq_log_prob
-from jax_moseq.models.allo_dynamics.gibbs import allo_log_likelihood
+from jax_moseq.models.env_allo_dynamics.gibbs import allo_log_likelihood
 
 
 @jax.jit
-def log_joint_likelihood(h, v, z, mask, delta_h, sigmasq_h, 
+def log_joint_likelihood(h, v, Y_env, z, mask, delta_h, sigmasq_h, 
                          delta_v, sigmasq_v, pi, **kwargs):
     """
     Calculate the total log probability for each latent state
@@ -15,6 +15,8 @@ def log_joint_likelihood(h, v, z, mask, delta_h, sigmasq_h,
         Heading angles.
     v : jax array of shape (N, T, d)
         Centroid positions.
+    Y_env : jax array of shape (N, T, K_env, 2)
+        Keypoints in the environment
     z : jax_array of shape (N, T - 1)
         Discrete state sequences.
     mask : jax array of shape (N, T)
@@ -39,7 +41,7 @@ def log_joint_likelihood(h, v, z, mask, delta_h, sigmasq_h,
     """
     ll = {}
     log_pz = discrete_stateseq_log_prob(z, pi)
-    log_phv = allo_log_likelihood(h, v, delta_h[z], sigmasq_h[z], delta_v[z], sigmasq_v[z])
+    log_phv = allo_log_likelihood(h, v, Y_env, delta_h[z], sigmasq_h[z], delta_v[z], sigmasq_v[z])
 
     ll['z'] = (log_pz * mask[...,2:]).sum()
     ll['hv'] = (log_phv * mask[...,1:]).sum()

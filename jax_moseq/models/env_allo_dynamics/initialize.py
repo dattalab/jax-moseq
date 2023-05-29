@@ -4,27 +4,42 @@ import jax.random as jr
 na = jnp.newaxis
 from functools import partial
 
-from jax_moseq.utils.distributions import sample_inv_gamma
+from jax_moseq.utils import psd_inv
+from jax_moseq.utils.distributions import sample_scaled_inv_chi2
 from jax_moseq.utils.transitions import init_hdp_transitions
-from jax_moseq.models.allo_dynamics.gibbs import resample_discrete_stateseqs
+from jax_moseq.models.env_allo_dynamics.gibbs import resample_discrete_stateseqs
 
 def init_allocentric_dynamics_params(seed, *, num_states, 
-                                     alpha0_v, beta0_v, lambda0_v, 
-                                     alpha0_h, beta0_h, lambda0_h, **kwargs):
+                                     nu_h, tausq_h, Lambda_h, 
+                                     nu_v, tausq_v, Lambda_v, **kwargs):
     """
     Initialize the parameters of the allocentric dynamics model
     from a normal-inverse-gamma prior.
     """
-    inv_gamma_fun = jax.vmap(sample_inv_gamma, in_axes=(0,None,None))
+    seeds = jr.split(seed, 5)
 
-    seeds_h = jr.split(jr.split(seed)[1], num_states)
-    sigmasq_h = inv_gamma_fun(seeds_h, alpha0_h, beta0_h)
-    delta_h = jax.vmap(jr.normal)(seeds_h) * jnp.sqrt(sigmasq_h / lambda0_h)
 
-    seeds_v = jr.split(jr.split(seed)[0], num_states)
-    sigmasq_v = inv_gamma_fun(seeds_v, alpha0_v, beta0_v)
-    fun = jax.vmap(partial(jr.normal, shape=(2,)))
-    delta_v = fun(seeds_v) * jnp.sqrt(sigmasq_v[:,na] / lambda0_v)
+    sigmasq_h = jax.vmap(
+        sample_scaled_inv_chi2, in_axes=(0,None,None)
+    )(jr.split(seeds[0], num_states), nu_h, tausq_h)
+
+    delta_h = jax.vmap(jr.multivariate_normal)(
+        jr.split(seeds[1], num_states), jnp.zeros((num_states,len(Lambda_h))), 
+        sigmasq_h[:,na,na] * psd_inv(Lambda_h)[na,:,:])
+
+    sigmasq_v = jax.vmap(
+        sample_scaled_inv_chi2, in_axes=(0,None,None)
+    )(jr.split(seeds[2], num_states), nu_v, tausq_v)
+    
+    delta_v_x = jax.vmap(jr.multivariate_normal)(
+        jr.split(seeds[3], num_states), jnp.zeros((num_states,len(Lambda_v))), 
+        sigmasq_v[:,na,na] * psd_inv(Lambda_v)[na,:,:])
+    
+    delta_v_y = jax.vmap(jr.multivariate_normal)(
+        jr.split(seeds[3], num_states), jnp.zeros((num_states,len(Lambda_v))), 
+        sigmasq_v[:,na,na] * psd_inv(Lambda_v)[na,:,:])
+    
+    delta_v = jnp.stack([delta_v_x, delta_v_y], axis=-2)
     return delta_h, sigmasq_h, delta_v, sigmasq_v
 
 
@@ -35,8 +50,9 @@ def init_params(seed, trans_hypparams, allo_hypparams):
         init_allocentric_dynamics_params(seed, **allo_hypparams)
     return params
 
-def init_states(seed, params, h, v, mask, **kwargs):
-    z = resample_discrete_stateseqs(seed, h, v, mask, **params)
+
+def init_states(seed, params, h, v, Y_env, mask, **kwargs):
+    z = resample_discrete_stateseqs(seed, h, v, Y_env, mask, **params)
     return {'z': z}
     
 def init_model(data=None,

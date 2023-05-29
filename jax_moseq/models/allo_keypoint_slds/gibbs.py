@@ -28,7 +28,7 @@ from dynamax.nonlinear_gaussian_ssm import (
 
 @jax.jit
 def resample_discrete_stateseqs(seed, x, h, v, mask, Ab, Q, 
-                                delta_h, sigma_h, delta_v, sigma_v, 
+                                delta_h, sigmasq_h, delta_v, sigmasq_v, 
                                 pi, **kwargs):
     """
     Resamples the discrete state sequence ``z``.
@@ -51,12 +51,12 @@ def resample_discrete_stateseqs(seed, x, h, v, mask, Ab, Q,
         Autoregressive noise covariances.
     delta_h: jax array of shape (num_states,)
         Mean change in heading for each discrete state.
-    sigma_h: jax array of shape (num_states,)
-        Standard deviation of change in heading for each discrete state.
+    sigmasq_h: jax array of shape (num_states,)
+        Variance of change in heading for each discrete state.
     delta_v: jax array of shape (num_states, 2)
         Mean change in centroid for each discrete state.
-    sigma_v: jax array of shape (num_states, 2)
-        Standard deviation of change in centroid for each discrete state.
+    sigmasq_v: jax array of shape (num_states, 2)
+        Variance of change in centroid for each discrete state.
     pi : jax_array of shape (num_states, num_states)
         Transition probabilities.
     **kwargs : dict
@@ -71,7 +71,7 @@ def resample_discrete_stateseqs(seed, x, h, v, mask, Ab, Q,
     num_samples = mask.shape[0]
     
     ll_fun = jax.vmap(partial(allo_log_likelihood, h, v))
-    log_likelihoods = ll_fun(delta_h, sigma_h, delta_v, sigma_v)[...,nlags-1:]
+    log_likelihoods = ll_fun(delta_h, sigmasq_h, delta_v, sigmasq_v)[...,nlags-1:]
     log_likelihoods += jax.lax.map(partial(ar_log_likelihood, x), (Ab, Q))
 
     _, z = jax.vmap(sample_hmm_stateseq, in_axes=(0,na,0,0))(
@@ -97,13 +97,13 @@ def resample_allocentric_dynamics_params(seed, *, mask, v, h, Ab, num_states, **
 
 
 def perturb_heading_and_centroid(seed, mask, Y, Y_bar, obs_variance,
-                                 delta_h, sigma_h, delta_v, sigma_v):
+                                 delta_h, sigmasq_h, delta_v, sigmasq_v):
     """
     Use an extended Kalman filter to perturb the heading and centroid
     based on their posterior distribution. The dynamics are given by 
     
-    h[t] = h[t-1] + delta_h[z_t] + N(0, sigma_h[z_t])
-    v[t] = v[t-1] + R(h[t-1])^T delta_v[z_t] + N(0, sigma_v[z_t] I_2)
+    h[t] = h[t-1] + delta_h[z_t] + N(0, sigmasq_h[z_t])
+    v[t] = v[t-1] + R(h[t-1])^T delta_v[z_t] + N(0, sigmasq_v[z_t] I_2)
     """
 
     def dynamics_function(hv, t):
@@ -126,7 +126,7 @@ def perturb_heading_and_centroid(seed, mask, Y, Y_bar, obs_variance,
     emission_covariance *= mask[...,na,na] 
     emission_covariance += 1e-2*(1-mask[...,na,na])*jnp.eye(Ytarg.shape[-1])[na,:,:]
     
-    dynamics_covariance = jnp.vstack([sigma_h**2, sigma_v**2, sigma_v**2]).T[:,:,na]*jnp.eye(3)[na,:,:]
+    dynamics_covariance = jnp.vstack([sigmasq_h, sigmasq_v, sigmasq_v]).T[:,:,na]*jnp.eye(3)[na,:,:]
     dynamics_covariance *= mask[...,1:,na,na] 
     dynamics_covariance += 1e8*(1-mask[...,1:,na,na])*jnp.eye(3)[na,:,:]
         
@@ -146,7 +146,7 @@ def perturb_heading_and_centroid(seed, mask, Y, Y_bar, obs_variance,
 
 @jax.jit
 def resample_heading_and_centroid(seed, mask, Y, x, z, s, Cd, sigmasq, 
-                                  delta_h, sigma_h, delta_v, sigma_v, 
+                                  delta_h, sigmasq_h, delta_v, sigmasq_v, 
                                   sigmasq_height=1, **kwargs):
     """
     Resample centroids `v` and heading angles `h`.
@@ -171,14 +171,14 @@ def resample_heading_and_centroid(seed, mask, Y, x, z, s, Cd, sigmasq,
         Unscaled noise.
     delta_h : jax array of shape (num_states,)
         Mean change in heading for each discrete state.
-    sigma_h : jax array of shape (num_states,)
-        Standard deviation of heading change for each discrete state.
+    sigmasq_h : jax array of shape (num_states,)
+        Variance of heading change for each discrete state.
     delta_v : jax array of shape (num_states, 2)
         Mean change in centroid for each discrete state.
-    sigma_v : jax array of shape (num_states,)
-        Standard deviation of centroid change for each discrete state.
+    sigmasq_v : jax array of shape (num_states,)
+        Variance of centroid change for each discrete state.
     sigmasq_height : float, default=1
-        Standard deviation of height change on each step.
+        Variance of height change on each step.
     **kwargs : dict
         Overflow, for convenience.
 
@@ -201,7 +201,7 @@ def resample_heading_and_centroid(seed, mask, Y, x, z, s, Cd, sigmasq,
     seeds = jr.split(seed, Y.shape[0])
     h,v = jax.vmap(perturb_heading_and_centroid)(
         seeds, mask, Y[...,:2], Y_bar, obs_variance, 
-        delta_h[z], sigma_h[z], delta_v[z], sigma_v[z])
+        delta_h[z], sigmasq_h[z], delta_v[z], sigmasq_v[z])
 
     # if the keypoints are 3D, then resample the height
     if Y.shape[-1] == 3:
@@ -269,8 +269,8 @@ def resample_model(data, seed, states, params, hypparams, noise_prior,
             **hypparams['ar_hypparams'])
         
         if verbose: print('Resampling allocentric dynamics')
-        (params['delta_h'], params['sigma_h'],
-         params['delta_v'], params['sigma_v']
+        (params['delta_h'], params['sigmasq_h'],
+         params['delta_v'], params['sigmasq_v']
         ) = resample_allocentric_dynamics_params(
             seed, **data, **states, **params, **hypparams['allo_hypparams'])
 
