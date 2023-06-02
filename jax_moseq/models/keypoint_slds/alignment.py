@@ -258,7 +258,7 @@ def vector_to_angle(V):
 
 def fit_pca(Y, mask, anterior_idxs=None, posterior_idxs=None, conf=None, 
             conf_threshold=0.5, verbose=False, PCA_fitting_num_frames=1000000, 
-            exclude_outliers_for_pca=True, fix_heading=False, **kwargs):
+            exclude_outliers_for_pca=False, fix_heading=False, **kwargs):
     """
     Fit a PCA model to transformed keypoint coordinates. If ``conf`` is
     not None, perform linear interpolation over outliers defined by
