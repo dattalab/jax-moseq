@@ -36,7 +36,7 @@ def init_allocentric_dynamics_params(seed, *, num_states,
         sigmasq_v[:,na,na] * psd_inv(Lambda_v)[na,:,:])
     
     delta_v_y = jax.vmap(jr.multivariate_normal)(
-        jr.split(seeds[3], num_states), jnp.zeros((num_states,len(Lambda_v))), 
+        jr.split(seeds[4], num_states), jnp.zeros((num_states,len(Lambda_v))), 
         sigmasq_v[:,na,na] * psd_inv(Lambda_v)[na,:,:])
     
     delta_v = jnp.stack([delta_v_x, delta_v_y], axis=-2)
