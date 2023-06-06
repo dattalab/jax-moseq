@@ -117,6 +117,34 @@ def fit_pca(Y, mask, PCA_fitting_num_frames=1000000,
     return pca
 
 
+def pad_along_axis(arr, pad_widths, axis=0, value=0):
+    """
+    Pad an array along a single axis
+
+    Parameters
+    -------
+    arr: ndarray, Array to be padded
+    pad_widths: tuple (int,int), Amount of padding on either end
+    axis: int, Axis along which to add padding
+    value: float, Value of padded array elements
+
+    Returns
+    _______
+    padded_arr: ndarray
+    """
+    pad_left_shape = list(arr.shape)
+    pad_right_shape = list(arr.shape)
+
+    pad_left_shape[axis] = pad_widths[0]
+    pad_right_shape[axis] = pad_widths[1]
+
+    padding_left = jnp.ones(pad_left_shape, dtype=arr.dtype)*value
+    padding_right = jnp.ones(pad_right_shape, dtype=arr.dtype)*value
+
+    padded_arr = jnp.concatenate([padding_left, arr, padding_right], axis=axis)
+    return padded_arr
+
+
 
 def unbatch(data, labels): 
     """
