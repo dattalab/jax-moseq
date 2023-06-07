@@ -282,10 +282,10 @@ def fit_pca(Y, mask, anterior_idxs=None, posterior_idxs=None, conf=None,
         Whether to print progress updates.
     PCA_fitting_num_frames : int, default=1000000
         Maximum number of frames for PCA fitting.
-    exclude_outliers_for_pca : bool, default=True
+    exclude_outliers_for_pca : bool, default=False
         Whether to exclude frames with low-confidence keypoints.
-        If False, then the low-confidence keypoint coordinates are l
-        inearly interpolated.
+        If False, then the low-confidence keypoint coordinates are
+        linearly interpolated.
     fix_heading : bool, default=False
         Whether keep the heading angle fixed. If true, the 
         heading ``h`` is set to 0 and keypoints are not rotated.
@@ -301,7 +301,7 @@ def fit_pca(Y, mask, anterior_idxs=None, posterior_idxs=None, conf=None,
         Y, anterior_idxs, posterior_idxs, conf, 
         conf_threshold, fix_heading, verbose)[0]
     
-    if not exclude_outliers_for_pca or conf is None: pca_mask = mask
+    if (not exclude_outliers_for_pca) or (conf is None): pca_mask = mask
     else: pca_mask = jnp.logical_and(mask, (conf > conf_threshold).all(-1))
     return utils.fit_pca(Y_flat, pca_mask, PCA_fitting_num_frames, verbose)
 
