@@ -9,26 +9,37 @@ from dynamax.utils.distributions import NormalInverseWishart
 from jax_moseq.models.bound_position.gibbs import resample_discrete_stateseqs
 
 
-def init_params(seed, centroid_hypparams, heading_hypparams, trans_hypparams, **kwargs):
+def init_params(seed, centroid_hypparams, heading_hypparams, 
+                trans_hypparams, unbound_location_params, **kwargs):
     params = {}
     seeds = jr.split(seed, 4)
 
     params['betas'], params['pi'] = init_hdp_transitions(seeds[0], **trans_hypparams)
 
-    params['sigmasq_v'], params['mu_v'] = NormalInverseWishart(
+    bound_sigmasq_v, bound_mu_v = NormalInverseWishart(
         centroid_hypparams['loc'],
         centroid_hypparams['conc'],
         centroid_hypparams['df'],
         centroid_hypparams['scale']
     ).sample(seed=seeds[1], sample_shape=(centroid_hypparams['num_states'],))
 
-    params['kappa_h'] = tfd.Gamma(
+    bound_kappa_h = tfd.Gamma(
         heading_hypparams['conc'], rate=heading_hypparams['rate']
     ).sample(seed=seeds[2], sample_shape=(heading_hypparams['num_states'],))
 
-    params['mu_h'] = jr.uniform(
+    bound_mu_h = jr.uniform(
         seeds[3], (heading_hypparams['num_states'],)
     ) * 2 * jnp.pi - jnp.pi
+    
+    unbound_mu_v = unbound_location_params['mu_v'][na]
+    unbound_sigmasq_v = unbound_location_params['sigmasq_v'][na]
+
+    params['mu_v'] = jnp.concatenate([bound_mu_v, unbound_mu_v])
+    params['sigmasq_v'] = jnp.concatenate([bound_sigmasq_v, unbound_sigmasq_v])
+
+    params['mu_h'] = jnp.concatenate([bound_mu_h, jnp.array([0.])])
+    params['kappa_h'] = jnp.concatenate([bound_kappa_h, jnp.array([0.])])
+        
 
     return params
 
@@ -44,7 +55,10 @@ def init_model(data, hypparams, seed=jr.PRNGKey(0)):
     seeds = jr.split(seed, 3)
     model['seed'] = seeds[0]
     model['hypparams'] = hypparams
-    model['params'] = init_params(seeds[1], **hypparams)
+    params = init_params(seeds[1], **hypparams)
+    
+    model['params'] = params
     model['states'] = {'w': resample_discrete_stateseqs(seed, **data, **model['params'])}
+    
     return model
 

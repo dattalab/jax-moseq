@@ -16,7 +16,7 @@ from jax_moseq.utils.distributions import (
     sample_hmm_stateseq, sample_vonmises_posterior
 )
 
-#@partial(jax.jit, static_argnums=(11,))
+@partial(jax.jit, static_argnums=(11,))
 def resample_centroid_params(seed, h_self, v_self, h_other, v_other, mask, w,
                              loc, conc, df, scale, num_states, **kwargs):
     """
@@ -30,7 +30,6 @@ def resample_centroid_params(seed, h_self, v_self, h_other, v_other, mask, w,
         Sx = (x * mask[...,na]).sum((0,1))
         SxxT = (x[...,na] * x[...,na,:] * mask[...,na,na]).sum((0,1))
         N = mask.sum()
-        print(loc, conc, df, scale)
         niw_prior = NormalInverseWishart(loc, conc, df, scale)
         niw_post = niw_posterior_update(niw_prior, (Sx, SxxT, N))
         return niw_post.sample(seed=seed)
@@ -40,20 +39,24 @@ def resample_centroid_params(seed, h_self, v_self, h_other, v_other, mask, w,
     return mu_v, sigmasq_v
 
 
-@partial(jax.jit, static_argnums=(9,))
+def vonmises_max_likelihood(h, mask):
+    x = jnp.stack([jnp.cos(h), jnp.sin(h)],axis=-1)
+    xbar = (x * mask[:,na]).sum(0) / mask.sum()
+    Rbar = jnp.linalg.norm(xbar)
+    mu = vector_to_angle(xbar)
+    kappa = Rbar*(2-Rbar**2) / (1-Rbar**2)
+    return mu, kappa
+
+@partial(jax.jit, static_argnums=(7,))
 def resample_heading_params(seed, h_self, v_self, h_other, v_other, 
-                            mask, w, conc, rate, num_states, **kwargs):
+                            mask, w, num_states, **kwargs):
     """
     Resample heading parameters for all states.
     """
     h_rel = relative_positions(h_self, v_self, h_other, v_other)[0].reshape(-1)
     masks = mask.reshape(1,-1) * jnp.eye(num_states)[:, w.reshape(-1)]
-
-    sample_fun = partial(sample_vonmises_posterior, conc=conc, rate=rate)
-    mu_h, kappa_h = jax.vmap(sample_fun, in_axes=(0,na,0))(
-        jr.split(seed, num_states), h_rel[::1000], masks[:,::1000])  
+    mu_h, kappa_h = jax.vmap(vonmises_max_likelihood, in_axes=(na,0))(h_rel, masks)  
     return mu_h, kappa_h
-
 
 
 def relative_positions(h_self, v_self, h_other, v_other):
