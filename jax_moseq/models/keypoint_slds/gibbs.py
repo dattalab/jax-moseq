@@ -356,11 +356,11 @@ def resample_model(data, seed, states, params, hypparams,
     params = model['params'].copy()
     states = model['states'].copy()
 
-    if not (states_only or skip_noise):
-        if verbose: print('Resampling sigmasq (global noise scales)')
-        params['sigmasq'] = resample_obs_variance(
-            seed, **data, **states, **params, 
-            s_0=noise_prior, **hypparams['obs_hypparams'])
+    # if not (states_only or skip_noise):
+    #     if verbose: print('Resampling sigmasq (global noise scales)')
+    #     params['sigmasq'] = resample_obs_variance(
+    #         seed, **data, **states, **params, 
+    #         s_0=noise_prior, **hypparams['obs_hypparams'])
 
     if verbose: print('Resampling x (continuous latent states)')
     states['x'] = resample_continuous_stateseqs(
