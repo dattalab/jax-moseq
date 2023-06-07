@@ -3,12 +3,19 @@ import jax
 import jax.numpy as jnp
 from sklearn.decomposition import PCA
 from jax.scipy.linalg import cho_factor, cho_solve
-from textwrap import fill
+
+
+def wrap_angle(x):
+    """
+    Wrap an angle to the range [-pi, pi].
+    """
+    return (x + jnp.pi) % (2 * jnp.pi) - jnp.pi
 
 
 def symmetrize(A):
     """Symmetrize a matrix."""
     return (A + A.swapaxes(-1, -2)) / 2
+    
 
 def psd_solve(A, B, diagonal_boost=1e-6):
     """
