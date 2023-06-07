@@ -8,9 +8,7 @@ import time
 from jax_moseq.models import keypoint_slds, arhmm, allo_dynamics
 from jax_moseq.utils import convert_data_precision
 
-from jax_moseq.models.allo_dynamics import (
-    compute_delta_heading_centroid, 
-    wrap_angle, allo_log_likelihood)
+from jax_moseq.models.allo_dynamics import allo_log_likelihood
 
 from jax_moseq.utils.autoregression import (
     get_nlags, ar_log_likelihood)
@@ -18,8 +16,7 @@ from jax_moseq.utils.autoregression import (
 from jax_moseq.models.keypoint_slds import (
     angle_to_rotation_matrix, estimate_aligned, apply_rotation)
 
-from jax_moseq.utils.distributions import (
-    sample_inv_gamma, sample_hmm_stateseq)
+from jax_moseq.utils.distributions import sample_hmm_stateseq
 
 from dynamax.nonlinear_gaussian_ssm import (
     ParamsNLGSSM, extended_kalman_posterior_sample)

@@ -4,19 +4,12 @@ import jax.random as jr
 from functools import partial
 import tensorflow_probability.substrates.jax.distributions as tfd
 
-from jax_moseq.utils import convert_data_precision, nan_check
+from jax_moseq.utils import convert_data_precision, nan_check, wrap_angle
 from jax_moseq.utils.transitions import resample_hdp_transitions
 from jax_moseq.models.keypoint_slds import angle_to_rotation_matrix
 from jax_moseq.utils.distributions import sample_inv_gamma, sample_hmm_stateseq
 
 na = jnp.newaxis
-
-
-def wrap_angle(x):
-    """
-    Wrap an angle to the range [-pi, pi].
-    """
-    return (x + jnp.pi) % (2 * jnp.pi) - jnp.pi
 
 
 def compute_delta_heading_centroid(h, v):
