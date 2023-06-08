@@ -51,6 +51,11 @@ def sample_invwishart(seed,S,nu):
     T = jax.scipy.linalg.solve_triangular(R.T,chol.T,lower=True).T
     return jnp.dot(T,T.T)
 
+def sample_niw(seed, mu, lam, nu, S):
+    sigma = sample_invwishart(seed, S, nu)
+    mu = jr.multivariate_normal(seed, mu, sigma/lam)
+    return mu, sigma
+
 @nan_check
 def sample_mniw(seed, nu, S, M, K):
     sigma = sample_invwishart(seed, S, nu)
@@ -87,35 +92,3 @@ def sample_hmm_stateseq(seed, transition_matrix, log_likelihoods, mask):
     L,z = hmm_posterior_sample(seed, initial_distribution, transition_matrix, masked_log_likelihoods)
     z = convert_data_precision(z)
     return L,z
-
-
-@partial(jax.jit, static_argnames=('n_iters',))
-def sample_vonmises_posterior(rng_key, thetas, mask, conc=1, rate=1, n_iters=50):
-    
-    def logdensity_fn(x):
-        loc = jnp.arctan(x['loc'])*2
-        logp = (tfd.VonMises(loc, x['kappa']).log_prob(thetas) * mask).sum()
-        logp += tfd.Gamma(conc, rate=rate).log_prob(x['kappa'])
-        return logp
-
-    # Build the kernel
-    step_size = 1e-3
-    inverse_mass_matrix = jnp.array([1., 1.])
-    nuts = blackjax.nuts(logdensity_fn, step_size, inverse_mass_matrix)
-
-    # Initialize the state
-    initial_position = {"loc": 0., "kappa": 1.}
-    state = nuts.init(initial_position)
-
-    # Define the loop body
-    def body_fn(i, state_rng_key):
-        rng_key, nuts_key = jax.random.split(state_rng_key[1])
-        state, _ = nuts.step(nuts_key, state_rng_key[0])
-        return state, rng_key
-
-    # Iterate using jax.lax.fori_loop
-    state, _ = jax.lax.fori_loop(0, n_iters, body_fn, (state, rng_key))
-    
-    mu = jnp.arctan(state[0]['loc'])*2
-    kappa = state[0]['kappa']
-    return mu, kappa

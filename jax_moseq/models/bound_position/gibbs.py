@@ -1,42 +1,50 @@
 import jax
 import jax.numpy as jnp
 import jax.random as jr
-from jax_moseq.models.keypoint_slds import angle_to_rotation_matrix
+from jax_moseq.models.keypoint_slds import angle_to_rotation_matrix, vector_to_angle
 from jax_moseq.utils.transitions import resample_hdp_transitions
 from jax_moseq.utils import wrap_angle
 from functools import partial
 na = jnp.newaxis
 import tensorflow_probability.substrates.jax.distributions as tfd
 
-from dynamax.utils.distributions import (
-    NormalInverseWishart, niw_posterior_update
+from jax_moseq.utils.distributions import (
+    sample_hmm_stateseq, sample_niw, sample_gamma
 )
 
-from jax_moseq.utils.distributions import (
-    sample_hmm_stateseq, sample_vonmises_posterior
-)
+def niw_posterior_params(X, mask, mu0, lambda0, nu0, S0):
+    N = mask.sum() + .001
+    sX = (X * mask[:,na]).sum(0) / N
+    sXXT = (X[...,na] * X[...,na,:] * mask[:,na,na]).sum(0) / N
+    
+    mu_n = (lambda0 * mu0 + sX) / (lambda0 + N)
+    lambda_n = lambda0 + N
+    nu_n = nu0 + N
+    S_n = S0 + sXXT + ((lambda0 * N) / (lambda0 + N)) * jnp.outer(mu0 - sX/N, mu0 - sX/N)
+    return mu_n, lambda_n, nu_n, S_n
+
 
 @partial(jax.jit, static_argnums=(11,))
-def resample_centroid_params(seed, h_self, v_self, h_other, v_other, mask, w,
-                             loc, conc, df, scale, num_states, **kwargs):
+def resample_centroid_params(seed, h_self, v_self, h_other, v_other, mask, z,
+                             mu0, lambda0, nu0, S0, num_states, **kwargs):
     """
     Resample centroid parameters for all states.
     """
     v_rel = relative_positions(h_self, v_self, h_other, v_other)[1].reshape(-1,2)
-    masks = mask.reshape(1,-1) * jnp.eye(num_states)[:, w.reshape(-1)]
+    masks = mask.reshape(1,-1) * jnp.eye(num_states)[:, z.reshape(-1)]
     
-    def _sample_params(seed, x, mask):
-
-        Sx = (x * mask[...,na]).sum((0,1))
-        SxxT = (x[...,na] * x[...,na,:] * mask[...,na,na]).sum((0,1))
-        N = mask.sum()
-        niw_prior = NormalInverseWishart(loc, conc, df, scale)
-        niw_post = niw_posterior_update(niw_prior, (Sx, SxxT, N))
-        return niw_post.sample(seed=seed)
-
-    sigmasq_v, mu_v = jax.vmap(_sample_params, in_axes=(0,na,0))(
+    def sample_fun(seed, x, mask):
+        return sample_niw(seed, *niw_posterior_params(x, mask, mu0, lambda0, nu0, S0))
+    
+    mu_v, sigmasq_v = jax.vmap(sample_fun, in_axes=(0,na,0))(
         jr.split(seed, num_states), v_rel, masks)
     return mu_v, sigmasq_v
+
+
+def heading_params_from_prior(seed, alpha, beta):
+    kappa_h = sample_gamma(seed, alpha, beta)
+    mu_h = jr.uniform(seed).squeeze() * 2 * jnp.pi - jnp.pi
+    return mu_h, kappa_h
 
 
 def vonmises_max_likelihood(h, mask):
@@ -49,13 +57,21 @@ def vonmises_max_likelihood(h, mask):
 
 @partial(jax.jit, static_argnums=(7,))
 def resample_heading_params(seed, h_self, v_self, h_other, v_other, 
-                            mask, w, num_states, **kwargs):
+                            mask, z, num_states, alpha, beta, **kwargs):
     """
     Resample heading parameters for all states.
     """
     h_rel = relative_positions(h_self, v_self, h_other, v_other)[0].reshape(-1)
-    masks = mask.reshape(1,-1) * jnp.eye(num_states)[:, w.reshape(-1)]
-    mu_h, kappa_h = jax.vmap(vonmises_max_likelihood, in_axes=(na,0))(h_rel, masks)  
+    masks = mask.reshape(1,-1) * jnp.eye(num_states)[:, z.reshape(-1)]
+
+    def get_heading_params(seed, mask):
+        return jax.lax.cond(
+            mask.sum() < 10, 
+            lambda: heading_params_from_prior(seed, alpha, beta),
+            lambda: vonmises_max_likelihood(h_rel, mask))
+    
+    seeds = jr.split(seed, num_states)
+    mu_h, kappa_h = jax.vmap(get_heading_params)(seeds, masks)  
     return mu_h, kappa_h
 
 
@@ -77,10 +93,10 @@ def log_likelihood(h_self, v_self, h_other, v_other, mu_v, sigmasq_v, mu_h, kapp
     v_self : jnp.ndarray of shape (num_seqs, T)
     h_other : jnp.ndarray of shape (num_seqs, T, 2)
     v_other : jnp.ndarray of shape (num_seqs, T)
-    mu_v : jnp.ndarray of shape (2)
-    sigmasq_v : jnp.ndarray of shape (2, 2)
-    mu_h : jnp.ndarray of shape ()
-    kappa_h : jnp.ndarray of shape ()
+    mu_v : jnp.ndarray of shape (..., 2)
+    sigmasq_v : jnp.ndarray of shape (...,2, 2)
+    mu_h : jnp.ndarray of shape (...,)
+    kappa_h : jnp.ndarray of shape (...,)
 
     Returns
     -------
@@ -96,18 +112,18 @@ def log_likelihood(h_self, v_self, h_other, v_other, mu_v, sigmasq_v, mu_h, kapp
 def resample_discrete_stateseqs(seed, h_self, v_self, h_other, v_other, mask, pi, 
                                 mu_v, sigmasq_v, mu_h, kappa_h, **kwargs):
     """
-    Resamples the discrete state sequence ``w``.
+    Resamples the discrete state sequence ``z``.
     """
     num_seqs = mask.shape[0]
     log_likelihoods = jax.vmap(log_likelihood, in_axes=(na,na,na,na,0,0,0,0))(
         h_self, v_self, h_other, v_other, mu_v, sigmasq_v, mu_h, kappa_h)
 
-    _, w = jax.vmap(sample_hmm_stateseq, in_axes=(0,na,0,0))(
+    _, z = jax.vmap(sample_hmm_stateseq, in_axes=(0,na,0,0))(
         jr.split(seed, num_seqs),
         pi,
         jnp.moveaxis(log_likelihoods,0,-1),
         mask.astype(float))
-    return w
+    return z
 
 
 def resample_model(data, seed, states, params, hypparams, states_only=False, verbose=False, **kwargs):
@@ -130,7 +146,7 @@ def resample_model(data, seed, states, params, hypparams, states_only=False, ver
 
     states : dict
         State dictionary containing
-        - `w` : jnp.ndarray of shape (num_seqs, T)
+        - `z` : jnp.ndarray of shape (num_seqs, T)
             Hidden states.
         
     params : dict
@@ -147,9 +163,9 @@ def resample_model(data, seed, states, params, hypparams, states_only=False, ver
     hypparams : dict
         Dictionary with two groups of hyperparameters:
         - centroid_hypparams : dict
-            NIW hypparams (loc, conc, df, scale, num_states)
+            NIW hypparams (mu0, lambda0, nu0, S0)
         - heading_hypparams : dict
-            NIG hypparams (conc, rate, num_states)
+            NIG hypparams (alpha, beta, num_states)
         - trans_hypparams : dict
             Sticky HDP HMM hypparams (alpha, kappa, gamma, num_states)
         - unbound_location_params : dict
@@ -170,7 +186,7 @@ def resample_model(data, seed, states, params, hypparams, states_only=False, ver
     if not states_only: 
         if verbose: print('transitions')
         params['betas'], params['pi'] = resample_hdp_transitions(
-            seeds[0], **data, **params, z=states['w'],
+            seeds[0], **data, **params, **states,
             **hypparams['trans_hypparams'])
         
         # centroid
@@ -195,7 +211,7 @@ def resample_model(data, seed, states, params, hypparams, states_only=False, ver
         params['kappa_h'] = jnp.concatenate([bound_kappa_h, jnp.array([0.])])
         
     if verbose: print('stateseqs')
-    states['w'] = resample_discrete_stateseqs(
+    states['z'] = resample_discrete_stateseqs(
         seed, **data, **params)
 
     return {'seed': seed,

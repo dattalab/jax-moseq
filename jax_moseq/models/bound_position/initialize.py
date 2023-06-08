@@ -2,11 +2,10 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 from jax_moseq.utils.transitions import init_hdp_transitions
-from functools import partial
 na = jnp.newaxis
-import tensorflow_probability.substrates.jax.distributions as tfd
-from dynamax.utils.distributions import NormalInverseWishart
-from jax_moseq.models.bound_position.gibbs import resample_discrete_stateseqs
+from jax_moseq.models.bound_position.gibbs import resample_discrete_stateseqs, heading_params_from_prior
+from jax_moseq.utils.distributions import sample_niw
+
 
 
 def init_params(seed, centroid_hypparams, heading_hypparams, 
@@ -16,21 +15,19 @@ def init_params(seed, centroid_hypparams, heading_hypparams,
 
     params['betas'], params['pi'] = init_hdp_transitions(seeds[0], **trans_hypparams)
 
-    bound_sigmasq_v, bound_mu_v = NormalInverseWishart(
-        centroid_hypparams['loc'],
-        centroid_hypparams['conc'],
-        centroid_hypparams['df'],
-        centroid_hypparams['scale']
-    ).sample(seed=seeds[1], sample_shape=(centroid_hypparams['num_states'],))
-
-    bound_kappa_h = tfd.Gamma(
-        heading_hypparams['conc'], rate=heading_hypparams['rate']
-    ).sample(seed=seeds[2], sample_shape=(heading_hypparams['num_states'],))
-
-    bound_mu_h = jr.uniform(
-        seeds[3], (heading_hypparams['num_states'],)
-    ) * 2 * jnp.pi - jnp.pi
+    sample_fun = lambda seed: sample_niw(seed,
+                                         centroid_hypparams['mu0'], 
+                                         centroid_hypparams['lambda0'], 
+                                         centroid_hypparams['nu0'], 
+                                         centroid_hypparams['S0'])
     
+    bound_mu_v, bound_sigmasq_v = jax.vmap(sample_fun)(
+        jr.split(seeds[1], centroid_hypparams['num_states']))
+
+    bound_mu_h, bound_kappa_h = jax.vmap(lambda seed: heading_params_from_prior(
+        seed, heading_hypparams['alpha'], heading_hypparams['beta'])
+    )(jr.split(seeds[2], heading_hypparams['num_states']))
+
     unbound_mu_v = unbound_location_params['mu_v'][na]
     unbound_sigmasq_v = unbound_location_params['sigmasq_v'][na]
 
@@ -58,7 +55,7 @@ def init_model(data, hypparams, seed=jr.PRNGKey(0)):
     params = init_params(seeds[1], **hypparams)
     
     model['params'] = params
-    model['states'] = {'w': resample_discrete_stateseqs(seed, **data, **model['params'])}
+    model['states'] = {'z': resample_discrete_stateseqs(seed, **data, **model['params'])}
     
     return model
 
