@@ -287,9 +287,11 @@ def resample_location(seed, Y, mask, x, h, s, Cd,
     return v
 
 
+
 def resample_model(data, seed, states, params, hypparams,
                    noise_prior, ar_only=False, states_only=False,
-                   skip_noise=False, **kwargs):
+                   skip_noise=False, fix_heading=False, verbose=False,
+                   **kwargs):
     """
     Resamples the Keypoint SLDS model given the hyperparameters,
     data, noise prior, current states, and current parameters.
@@ -314,8 +316,10 @@ def resample_model(data, seed, states, params, hypparams,
         Whether to restrict sampling to states.
     skip_noise : bool, default=False
         Whether to exclude ``sigmasq`` and ``s`` from resampling.
-    **kwargs : dict
-        Overflow, for convenience.
+    fix_heading : bool, default=False
+        Whether to exclude ``h`` from resampling.
+    verbose : bool, default=False
+        Whether to print progress info during resampling.
 
     Returns
     ------
@@ -324,31 +328,37 @@ def resample_model(data, seed, states, params, hypparams,
         updated seed, states, and parameters of the model.
     """
     model = arhmm.resample_model(data, seed, states, params,
-                                 hypparams, states_only)
+                                 hypparams, states_only, verbose=verbose)
     if ar_only:
         model['noise_prior'] = noise_prior
         return model
     
     seed = model['seed']
-    params = model['params']
-    states = model['states']
+    params = model['params'].copy()
+    states = model['states'].copy()
 
     if not (states_only or skip_noise):
+        if verbose: print('Resampling sigmasq (global noise scales)')
         params['sigmasq'] = resample_obs_variance(
             seed, **data, **states, **params, 
             s_0=noise_prior, **hypparams['obs_hypparams'])
 
+    if verbose: print('Resampling x (continuous latent states)')
     states['x'] = resample_continuous_stateseqs(
         seed, **data, **states, **params)
 
-    states['h'] = resample_heading(
-        seed, **data, **states, **params)
+    if not fix_heading:
+        if verbose: print('Resampling h (heading)')
+        states['h'] = resample_heading(
+            seed, **data, **states, **params)
 
+    if verbose: print('Resampling v (location)')
     states['v'] = resample_location(
         seed, **data, **states, **params, 
         **hypparams['cen_hypparams'])
 
     if not skip_noise:
+        if verbose: print('Resampling s (local noise scales)')
         states['s'] = resample_scales(
             seed, **data, **states, **params, 
             s_0=noise_prior, **hypparams['obs_hypparams'])

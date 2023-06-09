@@ -46,7 +46,7 @@ def count_transitions(num_states, stateseqs, mask):
 
 
 @njit
-def _sample_loyal_crf_table_counts(seed, customer_counts, dish_ratings, loyalty):
+def _sample_loyal_crf_table_counts(rng, customer_counts, dish_ratings, loyalty):
     """
     In a Chinese restaurant franchise (CRF) process with loyal customers,
     ``table_counts[i, j]`` represents the number of tables in restaurant ``i``
@@ -72,8 +72,8 @@ def _sample_loyal_crf_table_counts(seed, customer_counts, dish_ratings, loyalty)
 
     Parameters
     ----------
-    seed : int
-        Value for random seed.
+    rng : instance of numpy.random.Generator
+        Seeded random number generator
     customer_counts : numpy array of shape (N, N)
         Number of customers for each restaurant/dish pair.
     dish_ratings : numpy array of shape N
@@ -92,7 +92,7 @@ def _sample_loyal_crf_table_counts(seed, customer_counts, dish_ratings, loyalty)
     See the supplement to Fox et al. 2011 at
     <http://dx.doi.org/10.1214/10-AOAS395SUPP>.
     """
-    np.random.seed(seed)
+
     N = len(dish_ratings)    # num restaurants/dishes
 
     # Sample counts without considering loyalty factor
@@ -107,7 +107,7 @@ def _sample_loyal_crf_table_counts(seed, customer_counts, dish_ratings, loyalty)
                     # Account for loyalty factor
                     dish_rating += loyalty
                 p = dish_rating / (k + dish_rating)
-                bernoulli_sample = np.random.random() < p
+                bernoulli_sample = rng.random() < p
                 table_counts[i, j] += bernoulli_sample
     return table_counts
 
@@ -142,11 +142,11 @@ def _sample_beta_suffient_stats(seed, transition_counts,
     num_states = len(betas)
     
     # Sample table counts (uses numpy/numba)
-    seed = seed[0].item()
+    rng = np.random.default_rng(seed[0].item())
     concentrations = np.array(alpha * betas)
     transition_counts = np.array(transition_counts, dtype=np.int32)
     # m in Fox et al.
-    table_counts = _sample_loyal_crf_table_counts(seed, transition_counts,
+    table_counts = _sample_loyal_crf_table_counts(rng, transition_counts,
                                                   concentrations, kappa)
     
     # Downweight the influence of self transitions,
@@ -154,7 +154,7 @@ def _sample_beta_suffient_stats(seed, transition_counts,
     auxillary_param = table_counts    # corresponds to mbar in Fox et al.
     diagonal_counts = np.diag(auxillary_param)
     p = concentrations / (concentrations + kappa)
-    binomial_samples = np.random.binomial(diagonal_counts, p)
+    binomial_samples = rng.binomial(diagonal_counts, p)
     np.fill_diagonal(auxillary_param, binomial_samples)
     
     # Compute sufficient statistics

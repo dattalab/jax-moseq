@@ -1,8 +1,7 @@
 import jax, jax.numpy as jnp, jax.random as jr
 import tensorflow_probability.substrates.jax.distributions as tfd
 from dynamax.hidden_markov_model.inference import hmm_posterior_sample
-
-from jax_moseq.utils import safe_cho_factor
+from jax_moseq.utils import nan_check, convert_data_precision, safe_cho_factor
 na = jnp.newaxis
 
 def sample_vonmises(seed, theta, kappa):
@@ -31,6 +30,7 @@ def sample_mn(seed, M, U, V):
     G = jnp.dot(G, safe_cho_factor(V)[0].T)
     return M + G
 
+@nan_check
 def sample_invwishart(seed,S,nu):
     n = S.shape[0]
     
@@ -43,31 +43,39 @@ def sample_invwishart(seed,S,nu):
     T = jax.scipy.linalg.solve_triangular(R.T,chol.T,lower=True).T
     return jnp.dot(T,T.T)
 
+@nan_check
 def sample_mniw(seed, nu, S, M, K):
     sigma = sample_invwishart(seed, S, nu)
     A = sample_mn(seed, M, sigma, K)
     return A, sigma
 
+
 def sample_hmm_stateseq(seed, transition_matrix, log_likelihoods, mask):
     """Sample state sequences in a Markov chain.
-    
-    TODO Pass in initial_distribution (Array[num_states])
 
     Parameters
-        seed (PRNGKey)
-        transition_matrix (Array[num_states, num_states])
-        log_likelihoods (Array[num_timesteps]): sequence of log likelihoods of
-            emissions given hidden state and parameters
-        mask (BoolArray[num_timesteps]): sequence indicating whether to use an
-            emission (1) or not (0)
+    ----------
+    seed: jax.random.PRNGKey
+        Random seed
+    transition_matrix: jax array, shape (num_states, num_states)
+        Transition matrix
+    log_likelihoods: jax array, shape (num_timesteps, num_states)
+        Sequence of log likelihoods of emissions given hidden state and parameters
+    mask: jax array, shape (num_timesteps,)
+        Sequence indicating whether to use an emission (1) or not (0)
 
     Returns
-        log_norm (float): Posterior marginal log likelihood
-        states (IntArray[num_timesteps]): sequence of sampled states
+    -------
+    log_norm: float: 
+        Posterior marginal log likelihood
+    states: jax array, shape (num_timesteps,)
+        Sequence of sampled states
     """
 
     num_states = transition_matrix.shape[0]
     initial_distribution = jnp.ones(num_states)/num_states
 
     masked_log_likelihoods = log_likelihoods * mask[:,None]
-    return hmm_posterior_sample(seed, initial_distribution, transition_matrix, masked_log_likelihoods)
+    L,z = hmm_posterior_sample(seed, initial_distribution, transition_matrix, masked_log_likelihoods)
+    z = convert_data_precision(z)
+    return L,z
