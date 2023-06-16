@@ -1,8 +1,10 @@
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+from jax import lax
 
-from dynamax.linear_gaussian_ssm.inference import (lgssm_posterior_sample,
+from dynamax.linear_gaussian_ssm.parallel_inference import lgssm_posterior_sample as parallel_lgssm_sample
+from dynamax.linear_gaussian_ssm.inference import (lgssm_posterior_sample as serial_lgssm_sample,
                                                    ParamsLGSSM,
                                                    ParamsLGSSMInitial,
                                                    ParamsLGSSMDynamics,
@@ -13,7 +15,8 @@ from jax_moseq.utils import nan_check
 na = jnp.newaxis
 
 def kalman_sample(seed, ys, mask, zs, m0, S0, A, B, Q, C, D, Rs,
-                  masked_dynamics_params, masked_obs_noise, jitter=0):
+                  masked_dynamics_params, masked_obs_noise, jitter=0,
+                  parallel = True):
     """Run forward-filtering and backward-sampling to draw samples from posterior
     of a 1st-order dynamic system with autoregressive dynamics of order `n_lags`. 
     
@@ -52,6 +55,9 @@ def kalman_sample(seed, ys, mask, zs, m0, S0, A, B, Q, C, D, Rs,
     jitter : float, default=0
         Amount to boost the diagonal of the covariance matrix
         during backward-sampling of the continuous states.
+    parallel : bool, default=True,
+        Use parallel implementation of Kalman sampling, which can be faster
+        but has a significantly longer jit time.   
 
     Returns
     -------
@@ -96,7 +102,18 @@ def kalman_sample(seed, ys, mask, zs, m0, S0, A, B, Q, C, D, Rs,
     params = ParamsLGSSM(
         initial=initial_params, dynamics=dynamics_params, emissions=emissions_params,
     )
-    return lgssm_posterior_sample(seed, params, ys, jitter=jitter)
+    
+    # (hopefully) no need for jitter because tree-partitioned computation has less
+    # log instead of linear accumulaiton of errors
+    def _parallel_kalman(seed, params, ys, jitter):
+        return parallel_lgssm_sample(seed, params, ys)
+    def _serial_kalman(seed, params, ys, jitter):
+        return serial_lgssm_sample(seed, params, ys, jitter=jitter)
+    return lax.cond(
+        parallel, _parallel_kalman, _serial_kalman,
+        seed, params, ys, jitter
+    )
+
 
 
 def ar_to_lds(Ab, Q, Cd=None):
