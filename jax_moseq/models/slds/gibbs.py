@@ -316,7 +316,7 @@ def compute_squared_error(seed, Y, x, Cd, mask=None):
 
 def resample_model(data, seed, states, params, hypparams, 
                    ar_only=False, states_only=False,
-                   skip_noise=False, **kwargs):
+                   skip_noise=True, **kwargs):
     """
     Resamples the SLDS model given the hyperparameters, data,
     current states, and current parameters.
@@ -337,7 +337,7 @@ def resample_model(data, seed, states, params, hypparams,
         Whether to restrict sampling to ARHMM components.
     states_only : bool, default=False
         Whether to restrict sampling to states.
-    skip_noise : bool, default=False
+    skip_noise : bool, default=True
         Whether to exclude `sigmasq` and `s` from resampling.
     **kwargs : dict
         Overflow, for convenience.

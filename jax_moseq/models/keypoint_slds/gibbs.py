@@ -311,7 +311,7 @@ def resample_location(seed, Y, mask, x, h, s, Cd,
 
 def resample_model(data, seed, states, params, hypparams,
                    noise_prior, ar_only=False, states_only=False,
-                   skip_noise=False, fix_heading=False, verbose=False,
+                   skip_noise=True, fix_heading=False, verbose=False,
                    jitter=1e-3, parallel_kalman=True, **kwargs):
     """
     Resamples the Keypoint SLDS model given the hyperparameters,
@@ -335,7 +335,7 @@ def resample_model(data, seed, states, params, hypparams,
         Whether to restrict sampling to ARHMM components.
     states_only : bool, default=False
         Whether to restrict sampling to states.
-    skip_noise : bool, default=False
+    skip_noise : bool, default=True
         Whether to exclude ``sigmasq`` and ``s`` from resampling.
     fix_heading : bool, default=False
         Whether to exclude ``h`` from resampling.
@@ -364,11 +364,11 @@ def resample_model(data, seed, states, params, hypparams,
     params = model['params'].copy()
     states = model['states'].copy()
 
-    # if not (states_only or skip_noise):
-    #     if verbose: print('Resampling sigmasq (global noise scales)')
-    #     params['sigmasq'] = resample_obs_variance(
-    #         seed, **data, **states, **params, 
-    #         s_0=noise_prior, **hypparams['obs_hypparams'])
+    if not (states_only or skip_noise):
+        if verbose: print('Resampling sigmasq (global noise scales)')
+        params['sigmasq'] = resample_obs_variance(
+            seed, **data, **states, **params,
+            s_0=noise_prior, **hypparams['obs_hypparams'])
 
     if verbose: print('Resampling x (continuous latent states)')
     states['x'] = resample_continuous_stateseqs(
