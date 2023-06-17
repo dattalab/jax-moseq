@@ -313,8 +313,10 @@ def resample_location(seed, Y, mask, x, h, s, Cd, sigmasq, sigmasq_loc,
 
 def resample_model(data, seed, states, params, hypparams,
                    noise_prior, ar_only=False, states_only=False,
-                   skip_noise=True, fix_heading=False, verbose=False,
-                   jitter=1e-3, parallel_message_passing=True, **kwargs):
+                   resample_global_noise_scale=False, 
+                   resample_local_noise_scale=True, 
+                   fix_heading=False, verbose=False, jitter=1e-3, 
+                   parallel_message_passing=True, **kwargs):
     """
     Resamples the Keypoint SLDS model given the hyperparameters,
     data, noise prior, current states, and current parameters.
@@ -337,8 +339,10 @@ def resample_model(data, seed, states, params, hypparams,
         Whether to restrict sampling to ARHMM components.
     states_only : bool, default=False
         Whether to restrict sampling to states.
-    skip_noise : bool, default=True
-        Whether to exclude ``sigmasq`` and ``s`` from resampling.
+    resample_global_noise_scale : bool, default=False
+        Whether to resample the global noise scales (``sigmasq``)
+    resample_local_noise_scale : bool, default=True
+        Whether to resample the local noise scales (``s``)
     fix_heading : bool, default=False
         Whether to exclude ``h`` from resampling.
     jitter : float, default=1e-3
@@ -366,7 +370,7 @@ def resample_model(data, seed, states, params, hypparams,
     params = model['params'].copy()
     states = model['states'].copy()
 
-    if not (states_only or skip_noise):
+    if (not states_only) and resample_global_noise_scale:
         if verbose: print('Resampling sigmasq (global noise scales)')
         params['sigmasq'] = resample_obs_variance(
             seed, **data, **states, **params,
@@ -387,7 +391,7 @@ def resample_model(data, seed, states, params, hypparams,
         seed, **data, **states, **params, 
         **hypparams['cen_hypparams'])
 
-    if not skip_noise:
+    if resample_local_noise_scale:
         if verbose: print('Resampling s (local noise scales)')
         states['s'] = resample_scales(
             seed, **data, **states, **params, 
