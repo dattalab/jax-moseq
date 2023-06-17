@@ -20,7 +20,7 @@ na = jnp.newaxis
 @jax.jit
 def resample_continuous_stateseqs(seed, Y, mask, v, h, s, z, Cd,
                                   sigmasq, Ab, Q, jitter=1e-3, 
-                                  parallel_kalman=True, **kwargs):
+                                  parallel_message_passing=True, **kwargs):
     """
     Resamples the latent trajectories ``x``.
 
@@ -51,9 +51,9 @@ def resample_continuous_stateseqs(seed, Y, mask, v, h, s, z, Cd,
     jitter : float, default=1e-3
         Amount to boost the diagonal of the covariance matrix
         during backward-sampling of the continuous states.
-    parallel_kalman : bool, default=True,
-        Use parallel implementation of Kalman sampling, which can be faster
-        but has a significantly longer jit time.   
+    parallel_message_passing : bool, default=True,
+        Use associative scan for Kalman sampling, which is faster on
+        a GPU but has a significantly longer jit time.   
     **kwargs : dict
         Overflow, for convenience.
 
@@ -65,7 +65,7 @@ def resample_continuous_stateseqs(seed, Y, mask, v, h, s, z, Cd,
     Y, s, Cd, sigmasq = to_vanilla_slds(Y, v, h, s, Cd, sigmasq)
     x = slds.resample_continuous_stateseqs(
         seed, Y, mask, z, s, Ab, Q, Cd, sigmasq, jitter=jitter,
-        parallel_kalman = parallel_kalman)
+        parallel_message_passing = parallel_message_passing)
     return x
 
 
@@ -312,7 +312,7 @@ def resample_location(seed, Y, mask, x, h, s, Cd,
 def resample_model(data, seed, states, params, hypparams,
                    noise_prior, ar_only=False, states_only=False,
                    skip_noise=True, fix_heading=False, verbose=False,
-                   jitter=1e-3, parallel_kalman=True, **kwargs):
+                   jitter=1e-3, parallel_message_passing=True, **kwargs):
     """
     Resamples the Keypoint SLDS model given the hyperparameters,
     data, noise prior, current states, and current parameters.
@@ -344,9 +344,9 @@ def resample_model(data, seed, states, params, hypparams,
         during backward-sampling of the continuous states.
     verbose : bool, default=False
         Whether to print progress info during resampling.
-    parallel_kalman : bool, default=True,
-        Use parallel implementation of Kalman sampling, which can be faster
-        but has a significantly longer jit time.   
+    parallel_message_passing : bool, default=True,
+        Use associative scan for Kalman sampling, which is faster on
+        a GPU but has a significantly longer jit time.    
 
     Returns
     ------
@@ -373,7 +373,7 @@ def resample_model(data, seed, states, params, hypparams,
     if verbose: print('Resampling x (continuous latent states)')
     states['x'] = resample_continuous_stateseqs(
         seed, **data, **states, **params,
-        jitter=jitter, parallel_kalman = parallel_kalman)
+        jitter=jitter, parallel_message_passing = parallel_message_passing)
 
     if not fix_heading:
         if verbose: print('Resampling h (heading)')

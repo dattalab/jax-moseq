@@ -10,9 +10,8 @@ from jax_moseq.models import arhmm
 na = jnp.newaxis
 
 @jax.jit
-def resample_continuous_stateseqs(seed, y, mask, z, s, Ab, Q, 
-                                  Cd, sigmasq, jitter=1e-3,
-                                  parallel_kalman=True, **kwargs):
+def resample_continuous_stateseqs(seed, y, mask, z, s, Ab, Q, Cd, sigmasq, jitter=1e-3,
+                                  parallel_message_passing=True, **kwargs):
     """Resample the latent trajectories `x`.
 
     Parameters
@@ -39,9 +38,9 @@ def resample_continuous_stateseqs(seed, y, mask, z, s, Ab, Q,
     jitter : float, default=1e-3
         Amount to boost the diagonal of the covariance matrix
         during backward-sampling of the continuous states.
-    parallel_kalman : bool, default=True,
-        Use parallel implementation of Kalman sampling, which can be faster
-        but has a significantly longer jit time.   
+    parallel_message_passing : bool, default=True,
+        Use associative scan for Kalman sampling, which is faster on
+        a GPU but has a significantly longer jit time.  
     **kwargs : dict
         Overflow, for convenience.
 
@@ -101,7 +100,7 @@ def resample_continuous_stateseqs(seed, y, mask, z, s, Ab, Q,
     #   Rs:     (n_timesteps-n_lags+1, obs_dim)
     # ==================================================
     in_axes = (0, 0, 0, 0, na, na, na, na, na, na, na, 0, na, na)
-    x = jax.vmap(partial(kalman_sample, jitter=jitter, parallel = parallel_kalman), in_axes)(
+    x = jax.vmap(partial(kalman_sample, jitter=jitter, parallel=parallel_message_passing), in_axes)(
         jr.split(seed, n_sessions), y_, mask_, z,
         init_dynamics_mean, init_dynamics_cov,
         A_, b_, Q_, C_, d_, R_,
@@ -316,7 +315,8 @@ def compute_squared_error(seed, Y, x, Cd, mask=None):
 
 def resample_model(data, seed, states, params, hypparams, 
                    ar_only=False, states_only=False,
-                   skip_noise=True, **kwargs):
+                   skip_noise=True, parallel_message_passing=False,
+                   **kwargs):
     """
     Resamples the SLDS model given the hyperparameters, data,
     current states, and current parameters.
@@ -339,6 +339,9 @@ def resample_model(data, seed, states, params, hypparams,
         Whether to restrict sampling to states.
     skip_noise : bool, default=True
         Whether to exclude `sigmasq` and `s` from resampling.
+    parallel_message_passing : bool, default=True,
+        Use associative scan for Kalman sampling, which is faster on
+        a GPU but has a significantly longer jit time.  
     **kwargs : dict
         Overflow, for convenience.
 
@@ -363,7 +366,8 @@ def resample_model(data, seed, states, params, hypparams,
             **hypparams['obs_hypparams'])
         
     states['x'] = resample_continuous_stateseqs(
-        seed, **data, **states, **params)
+        seed, **data, **states, **params, 
+        parallel_message_passing=parallel_message_passing)
 
     if not skip_noise:
         states['s'] = resample_scales(

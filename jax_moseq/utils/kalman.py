@@ -11,7 +11,6 @@ from dynamax.linear_gaussian_ssm.inference import (lgssm_posterior_sample as ser
                                                    ParamsLGSSMEmissions,)
 
 from jax_moseq.utils.autoregression import get_nlags
-from jax_moseq.utils import nan_check
 na = jnp.newaxis
 
 def kalman_sample(seed, ys, mask, zs, m0, S0, A, B, Q, C, D, Rs,
@@ -56,8 +55,8 @@ def kalman_sample(seed, ys, mask, zs, m0, S0, A, B, Q, C, D, Rs,
         Amount to boost the diagonal of the covariance matrix
         during backward-sampling of the continuous states.
     parallel : bool, default=True,
-        Use parallel implementation of Kalman sampling, which can be faster
-        but has a significantly longer jit time.   
+        Use associative scan for Kalman sampling, which is faster on
+        a GPU but has a significantly longer jit time.   
 
     Returns
     -------
@@ -103,12 +102,13 @@ def kalman_sample(seed, ys, mask, zs, m0, S0, A, B, Q, C, D, Rs,
         initial=initial_params, dynamics=dynamics_params, emissions=emissions_params,
     )
     
-    # (hopefully) no need for jitter because tree-partitioned computation has less
-    # log instead of linear accumulaiton of errors
     def _parallel_kalman(seed, params, ys, jitter):
+        # no jitter since error doesn't accumulate sequentially
         return parallel_lgssm_sample(seed, params, ys)
+    
     def _serial_kalman(seed, params, ys, jitter):
         return serial_lgssm_sample(seed, params, ys, jitter=jitter)
+    
     return lax.cond(
         parallel, _parallel_kalman, _serial_kalman,
         seed, params, ys, jitter
