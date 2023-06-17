@@ -15,7 +15,7 @@ na = jnp.newaxis
 
 def kalman_sample(seed, ys, mask, zs, m0, S0, A, B, Q, C, D, Rs,
                   masked_dynamics_params, masked_obs_noise, jitter=0,
-                  parallel = True):
+                  parallel=True):
     """Run forward-filtering and backward-sampling to draw samples from posterior
     of a 1st-order dynamic system with autoregressive dynamics of order `n_lags`. 
     
