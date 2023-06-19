@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+from functools import partial
 
 from jax_moseq.utils.kalman import kalman_sample
 from jax_moseq.utils.distributions import sample_vonmises_fisher
@@ -176,8 +177,8 @@ def compute_squared_error(Y, x, v, h, Cd, mask=None):
         Squared error between model predicted and
         true observations.
     """
-    Y_bar = estimate_coordinates(x, v, h, Cd)
-    sqerr = ((Y - Y_bar) ** 2).sum(-1)
+    Y_est = estimate_coordinates(x, v, h, Cd)
+    sqerr = ((Y - Y_est) ** 2).sum(-1)
     if mask is not None:
         sqerr = mask[..., na] * sqerr
     return sqerr
