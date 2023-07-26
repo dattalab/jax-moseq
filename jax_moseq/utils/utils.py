@@ -5,7 +5,6 @@ from sklearn.decomposition import PCA
 from jax.scipy.linalg import cho_factor, cho_solve
 from textwrap import fill
 
-
 def symmetrize(A):
     """Symmetrize a matrix."""
     return (A + A.swapaxes(-1, -2)) / 2

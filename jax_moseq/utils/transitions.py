@@ -337,3 +337,61 @@ def init_hdp_transitions(seed, num_states, alpha, kappa, gamma, **kwargs):
     # pseudocount for numerical stability
     pi = (pi+eps)/(pi+eps).sum(1)[:,None]
     return betas, pi
+
+
+
+
+def sample_dir_transitions(seed, transition_counts, beta, kappa):
+    """
+    Sample a transition matrix using a sticky Dirichlet prior.
+
+    Parameters
+    ----------
+    seed : jr.PRNGKey
+        JAX random seed.
+    transition_counts : jax array of shape (num_states, num_states)
+        The number of transitions between every pair of states.
+    beta : scalar
+        Dirichlet prior concentration parameter.
+    kappa : scalar
+        State persistence (i.e. "stickiness") hyperparameter.
+
+    Returns
+    -------
+    pi : jax_array of shape (num_states, num_states)
+        Transition probabilities.
+    """
+    num_states = transition_counts.shape[0]
+    conc = (beta + transition_counts) + kappa * jnp.eye(num_states)
+    pi = jax.vmap(jr.dirichlet)(jr.split(seed, num_states), conc)
+    return pi
+
+
+def resample_dir_transitions(seed, num_states, z, mask, beta, kappa, **kwargs):
+    """
+    Resample Markov transition probabilities using a sticky Dirichlet prior.
+
+    Parameters
+    ----------
+    seed : jr.PRNGKey
+        JAX random seed.
+    num_states : int
+        Max number of HMM states.
+    z : jax_array of shape (..., T - n_lags)
+        Discrete state sequences.
+    mask : jax array of shape (..., T)
+        Binary indicator for which data points are valid.
+    beta : scalar
+        Dirichlet prior concentration parameter.
+    kappa : scalar
+        State persistence (i.e. "stickiness") hyperparameter.
+
+    Returns
+    -------
+    pi : jax_array of shape (num_states, num_states)
+        Resampled transition probabilities.
+    """
+    transition_counts = count_transitions(num_states, z, mask)
+    pi = sample_dir_transitions(seed, transition_counts, beta, kappa)
+    return pi
+

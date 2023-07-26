@@ -384,7 +384,7 @@ def _check_init_args(data, states, params, hypparams,
         
     if has_conf and ((noise_prior is None) and
                      (error_estimator is None)):
-        raise ValueError('If confidences are provided, must also provide'
+        raise ValueError('If confidences are provided, must also provide '
                          'either `error_estimator` or `noise_prior`.')
         
     if not (states and params) and (anterior_idxs is None or

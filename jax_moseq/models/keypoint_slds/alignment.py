@@ -303,6 +303,11 @@ def fit_pca(Y, mask, anterior_idxs=None, posterior_idxs=None, conf=None,
     
     if (not exclude_outliers_for_pca) or (conf is None): pca_mask = mask
     else: pca_mask = jnp.logical_and(mask, (conf > conf_threshold).all(-1))
+    
+    assert pca_mask.sum() >= (Y.shape[-1] * Y.shape[-2]), (
+        "Not enough frames for PCA fitting. Make sure "
+        "`exclude_outliers_for_pca=False` 'or decrease `conf_threshold`.")
+    
     return utils.fit_pca(Y_flat, pca_mask, PCA_fitting_num_frames, verbose)
 
 
@@ -344,8 +349,7 @@ def preprocess_for_pca(Y, anterior_idxs, posterior_idxs, conf=None,
         if verbose:
             n = outliers.sum()
             pct = outliers.mean() * 100
-            if verbose:
-                print(f'Interpolating {n} ({pct:.1f}%) low-confidence keypoints')
+            print(f'Interpolating {n} ({pct:.1f}%) low-confidence keypoints')
         Y = interpolate(Y, outliers)
     
     if fix_heading:
