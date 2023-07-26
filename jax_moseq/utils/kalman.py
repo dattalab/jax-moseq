@@ -92,7 +92,7 @@ def kalman_sample(seed, ys, mask, zs, m0, S0, A, B, Q, C, D, Rs,
     # Inflate Rs_masked from diagonal covariance (..., obs_dim) to full covariance
     emissions_params=ParamsLGSSMEmissions(
         weights=C, bias=D, input_weights=jnp.zeros((obs_dim, 0)),
-        cov=jax.vmap(jnp.diag)(Rs_masked),
+        cov=Rs_masked,
     )
 
     # ===============================
