@@ -4,10 +4,14 @@ import jax.numpy as jnp
 from sklearn.decomposition import PCA
 from jax.scipy.linalg import cho_factor, cho_solve
 from textwrap import fill
+import functools
+
+_MIXED_MAP_ITERS = 1
 
 def symmetrize(A):
     """Symmetrize a matrix."""
     return (A + A.swapaxes(-1, -2)) / 2
+
 
 def psd_solve(A, B, diagonal_boost=1e-6):
     """
@@ -116,7 +120,6 @@ def fit_pca(Y, mask, PCA_fitting_num_frames=1000000,
     return pca
 
 
-
 def unbatch(data, labels): 
     """
     Invert :py:func:`jax_moseq.utils.batch`
@@ -207,3 +210,96 @@ def batch(data_dict, keys=None, seg_length=None, seg_overlap=30):
     mask = np.stack(mask)
     return stack,mask,labels
 
+
+def get_mixed_map_iters():
+    """Get the number of iterations to use for jax.lax.map in
+    :py:func:`jax_moseq.utils.mixed_map`."""
+    return _MIXED_MAP_ITERS
+
+
+def set_mixed_map_iters(iters):
+    """Set the number of iterations to use for jax.lax.map in
+    :py:func:`jax_moseq.utils.mixed_map`."""
+    global _MIXED_MAP_ITERS
+    _MIXED_MAP_ITERS = iters
+
+
+
+def _reshape_args(args, axes):
+    """Reshape args to (lax.map dim, vmap dim, [other dims])"""
+    mm_iters = get_mixed_map_iters()
+    axis_size = args[0].shape[axes[0]]
+    vmap_size = ceil(axis_size / mm_iters)
+    lmap_size = ceil(axis_size / vmap_size)
+    padding = vmap_size * lmap_size - axis_size
+    
+    def _reshape(a, axis):
+        if axis > 0:
+            a = jnp.moveaxis(a, axis, 0)
+        if padding > 0:
+            a = jnp.concatenate((a, jnp.zeros((padding, *a.shape[1:]))))
+        return a.reshape(lmap_size, vmap_size, *a.shape[1:])
+    
+    args = [_reshape(arg,axis) for arg,axis in zip(args, axes)]
+    return args, axis_size
+
+
+def _reshape_outputs(outputs, axes, axis_size):
+    """Reshape outputs from (lax.map dim, vmap dim, [other dims])"""
+    def _reshape(a, axis):
+        a = a.reshape(-1, *a.shape[2:])[:axis_size]
+        if axis > 0:
+            a = jnp.moveaxis(a, 0, axis)
+        return a
+
+    outputs = [_reshape(out,axis) for out,axis in zip(outputs, axes)]
+    return outputs
+
+
+def _partial(fun, other_args, mapped_argnums, other_argnums):
+    def partial_fun(mapped_args):
+        args = {}
+        for i,arg in zip(mapped_argnums, mapped_args): args[i] = arg
+        for i,arg in zip(other_argnums, other_args): args[i] = arg
+        args = [args[i] for i in range(len(args))]
+        return fun(*args)
+    return partial_fun
+
+
+def _sort_args(args, in_axes):
+    """Sort arguments into mapped and unmapped arguments."""
+    mapped_args, mapped_argnums = [],[]
+    other_args, other_argnums = [],[]
+    for i,(arg,axis) in enumerate(zip(args, in_axes)):
+        if axis is not None:
+            mapped_args.append(arg)
+            mapped_argnums.append(i)
+        else:
+            other_args.append(arg)
+            other_argnums.append(i)
+    return mapped_args, mapped_argnums, other_args, other_argnums
+
+
+def mixed_map(fun, in_axes=0, out_axes=0):
+    """
+    Combine jax.vmap and jax.lax.map for parallelization. 
+    
+    This function is similar to `jax.vmap`, except that it combines 
+    `jax.vmap` with `jax.lax.map` to prevent OOM errors. Given an 
+    axis size of N to map over, `jax.vmap` is applied serially to 
+    chunks of size `ceil(N/iters)`, where `iters` is a global variable 
+    specified by :py:func:`jax_moseq.utils.set_mixed_map_iters`.
+    """
+    if isinstance(in_axes, int): in_axes = tuple([in_axes])
+    if isinstance(out_axes, int): out_axes = tuple([out_axes])
+    
+    @functools.wraps(fun)
+    def mixed_map_f(*args):
+        mapped_args, mapped_argnums, other_args, other_argnums = _sort_args(args, in_axes)
+        mapped_args, axis_size = _reshape_args(mapped_args, [in_axes[i] for i in mapped_argnums])
+        f = _partial(fun, other_args, mapped_argnums, other_argnums)
+        outputs = jax.lax.map(jax.vmap(f), mapped_args)
+        outputs = _reshape_outputs(outputs, out_axes, axis_size)
+        return outputs
+
+    return mixed_map_f
