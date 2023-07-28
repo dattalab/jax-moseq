@@ -1,7 +1,7 @@
 import jax, jax.numpy as jnp, jax.random as jr
 import tensorflow_probability.substrates.jax.distributions as tfd
 from dynamax.hidden_markov_model.inference import hmm_posterior_sample
-from jax_moseq.utils import nan_check, convert_data_precision
+from jax_moseq.utils import convert_data_precision
 na = jnp.newaxis
 
 def sample_vonmises(seed, theta, kappa):
@@ -30,7 +30,6 @@ def sample_mn(seed, M, U, V):
     G = jnp.dot(G,jnp.linalg.cholesky(V).T)
     return M + G
 
-@nan_check
 def sample_invwishart(seed,S,nu):
     n = S.shape[0]
     
