@@ -317,7 +317,7 @@ def resample_model(data, seed, states, params, hypparams,
                    resample_global_noise_scale=False, 
                    resample_local_noise_scale=True, 
                    fix_heading=False, verbose=False, jitter=1e-3, 
-                   parallel_message_passing=True, **kwargs):
+                   parallel_message_passing=False, **kwargs):
     """
     Resamples the Keypoint SLDS model given the hyperparameters,
     data, noise prior, current states, and current parameters.
