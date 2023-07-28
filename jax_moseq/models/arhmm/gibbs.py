@@ -7,6 +7,7 @@ from jax_moseq.utils import (
     psd_solve, 
     psd_inv, 
     nan_check,
+    mixed_map
 )
 
 from jax_moseq.utils.distributions import (
@@ -55,7 +56,7 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, **kwargs):
     num_samples = mask.shape[0]
 
     log_likelihoods = jax.lax.map(partial(ar_log_likelihood, x), (Ab, Q))
-    _, z = jax.vmap(sample_hmm_stateseq, in_axes=(0,na,0,0))(
+    _, z = mixed_map(sample_hmm_stateseq, in_axes=(0,na,0,0))(
         jr.split(seed, num_samples),
         pi,
         jnp.moveaxis(log_likelihoods,0,-1),
