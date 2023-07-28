@@ -5,6 +5,7 @@ from sklearn.decomposition import PCA
 from jax.scipy.linalg import cho_factor, cho_solve
 from textwrap import fill
 import functools
+from math import ceil
 
 _MIXED_MAP_ITERS = 1
 
@@ -373,6 +374,7 @@ def _reshape_outputs(outputs, axes, axis_size):
         return a
 
     outputs = [_reshape(out,axis) for out,axis in zip(outputs, axes)]
+    if len(outputs)==1: outputs = outputs[0]
     return outputs
 
 
@@ -400,7 +402,7 @@ def _sort_args(args, in_axes):
     return mapped_args, mapped_argnums, other_args, other_argnums
 
 
-def mixed_map(fun, in_axes=0, out_axes=0):
+def mixed_map(fun, in_axes=None, out_axes=None):
     """
     Combine jax.vmap and jax.lax.map for parallelization. 
     
@@ -409,16 +411,27 @@ def mixed_map(fun, in_axes=0, out_axes=0):
     axis size of N to map over, `jax.vmap` is applied serially to 
     chunks of size `ceil(N/iters)`, where `iters` is a global variable 
     specified by :py:func:`jax_moseq.utils.set_mixed_map_iters`.
-    """
-    if isinstance(in_axes, int): in_axes = tuple([in_axes])
-    if isinstance(out_axes, int): out_axes = tuple([out_axes])
-    
+    """    
     @functools.wraps(fun)
     def mixed_map_f(*args):
+        
+        nonlocal in_axes
+        nonlocal out_axes
+        
+        if in_axes is None: in_axes = tuple([0]*len(args))
+        else: assert len(in_axes)==len(args), (
+            '`in_axes` should be a tuple with the same length as the number of arguments')
+
         mapped_args, mapped_argnums, other_args, other_argnums = _sort_args(args, in_axes)
         mapped_args, axis_size = _reshape_args(mapped_args, [in_axes[i] for i in mapped_argnums])
         f = _partial(fun, other_args, mapped_argnums, other_argnums)
         outputs = jax.lax.map(jax.vmap(f), mapped_args)
+
+        if not isinstance(outputs, tuple) or isinstance(outputs, list): outputs = (outputs,)
+        if out_axes is None: out_axes = tuple([0]*len(outputs))
+        else: assert len(out_axes)==len(outputs), (
+            '`out_axes` should be a tuple with the same length as the number of function outputs')
+        
         outputs = _reshape_outputs(outputs, out_axes, axis_size)
         return outputs
 

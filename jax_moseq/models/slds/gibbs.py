@@ -4,7 +4,7 @@ import jax.random as jr
 from functools import partial
 
 from jax_moseq.utils.kalman import kalman_sample, ar_to_lds
-
+from jax_moseq.utils import mixed_map
 from jax_moseq.models import arhmm
 
 na = jnp.newaxis
@@ -88,7 +88,6 @@ def resample_continuous_stateseqs(seed, y, mask, z, s, Ab, Q, Cd, sigmasq, jitte
         'bias': jnp.zeros(ar_dim),
         'cov': jnp.eye(ar_dim) * masked_dynamics_noise,
     }
-
     masked_obs_noise_diag = jnp.ones(obs_dim) * masked_obs_noise
 
     # ==================================================
@@ -100,7 +99,7 @@ def resample_continuous_stateseqs(seed, y, mask, z, s, Ab, Q, Cd, sigmasq, jitte
     #   Rs:     (n_timesteps-n_lags+1, obs_dim)
     # ==================================================
     in_axes = (0, 0, 0, 0, na, na, na, na, na, na, na, 0, na, na)
-    x = jax.vmap(partial(kalman_sample, jitter=jitter, parallel=parallel_message_passing), in_axes)(
+    x = mixed_map(partial(kalman_sample, jitter=jitter, parallel=parallel_message_passing), in_axes)(
         jr.split(seed, n_sessions), y_, mask_, z,
         init_dynamics_mean, init_dynamics_cov,
         A_, b_, Q_, C_, d_, R_,
