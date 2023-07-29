@@ -358,7 +358,8 @@ def _reshape_args(args, axes):
         if axis > 0:
             a = jnp.moveaxis(a, axis, 0)
         if padding > 0:
-            a = jnp.concatenate((a, jnp.zeros((padding, *a.shape[1:]))))
+            padding_array = jnp.zeros((padding, *a.shape[1:]), dtype=a.dtype)
+            a = jnp.concatenate((a, padding_array))
         return a.reshape(lmap_size, vmap_size, *a.shape[1:])
     
     args = [_reshape(arg,axis) for arg,axis in zip(args, axes)]
