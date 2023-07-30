@@ -5,9 +5,130 @@ from sklearn.decomposition import PCA
 from jax.scipy.linalg import cho_factor, cho_solve
 from textwrap import fill
 
+
+
+def concatenate_stateseqs(stateseqs, mask=None):
+    """
+    Concatenate state sequences, optionally applying a mask.
+
+    Parameters
+    ----------
+    stateseqs: ndarray of shape (..., t), or dict or list of such arrays
+        Batch of state sequences where the last dim indexes time, or a
+        dict/list containing state sequences as 1d arrays.
+
+    mask: ndarray of shape (..., >=t), default=None
+        Binary indicator for which elements of `stateseqs` are valid,
+        used in the case where `stateseqs` is an ndarray. If `mask` 
+        contains more time-points than `stateseqs`, the initial extra 
+        time-points will be ignored.
+
+    Returns
+    -------
+    stateseqs_flat: ndarray
+        1d array containing all state sequences 
+    """
+    if isinstance(stateseqs, dict):
+        stateseq_flat = np.hstack(list(stateseqs.values()))
+    elif isinstance(stateseqs, list):
+        stateseq_flat = np.hstack(stateseqs)
+    elif mask is not None:
+        stateseq_flat = stateseqs[mask[:,-stateseqs.shape[1]:]>0]
+    else: stateseq_flat = stateseqs.flatten()
+    return stateseq_flat
+
+
+def get_durations(stateseqs, mask=None):
+    """
+    Get durations for a batch of state sequences. 
+
+    Parameters
+    ----------
+    stateseqs: ndarray of shape (..., t), or dict or list of such arrays
+        Batch of state sequences where the last dim indexes time, or a
+        dict/list containing state sequences as 1d arrays.
+
+    mask: ndarray of shape (..., >=t), default=None
+        Binary indicator for which elements of `stateseqs` are valid,
+        used in the case where `stateseqs` is an ndarray. If `mask` 
+        contains more time-points than `stateseqs`, the initial extra 
+        time-points will be ignored.
+
+    Returns
+    -------
+    durations: 1d array
+        The duration of each each state (across all state sequences)
+
+    Examples
+    --------
+    >>> stateseqs = {
+        'name1': np.array([1, 1, 2, 2, 2, 3]),
+        'name2': np.array([0, 0, 0, 1])
+    }
+    >>> get_durations(stateseqs)
+    array([2, 3, 1, 3, 1])
+    """
+    stateseq_flat = concatenate_stateseqs(stateseqs, mask=mask).astype(int)
+    stateseq_padded = np.hstack([[-1],stateseq_flat,[-1]])
+    changepoints = np.diff(stateseq_padded).nonzero()[0]
+    return changepoints[1:]-changepoints[:-1]
+
+
+def get_frequencies(stateseqs, mask=None, num_states=None, runlength=True):
+    """
+    Get state frequencies for a batch of state sequences. 
+
+    Parameters
+    ----------
+    stateseqs: ndarray of shape (..., t), or dict or list of such arrays
+        Batch of state sequences where the last dim indexes time, or a
+        dict/list containing state sequences as 1d arrays.
+
+    mask: ndarray of shape (..., >=t), default=None
+        Binary indicator for which elements of `stateseqs` are valid,
+        used in the case where `stateseqs` is an ndarray. If `mask` 
+        contains more time-points than `stateseqs`, the initial extra 
+        time-points will be ignored.
+
+    num_states: int, default=None
+        Number of different states. If None, the number of states will
+        be set to `max(stateseqs)+1`.
+
+    runlength: bool, default=True
+        Whether to count frequency by the number of instances of each
+        state (True), or by the number of frames in each state (False).
+
+    Returns
+    -------
+    frequencies: 1d array
+        Frequency of each state across all state sequences
+
+    Examples
+    --------
+    >>> stateseqs = {
+        'name1': np.array([1, 1, 2, 2, 2, 3]),
+        'name2': np.array([0, 0, 0, 1])}
+    >>> get_frequencies(stateseqs, runlength=True)
+    array([0.2, 0.4, 0.2, 0.2])
+    >>> get_frequencies(stateseqs, runlength=False)
+    array([0.3, 0.3, 0.3, 0.1])
+    """    
+    stateseq_flat = concatenate_stateseqs(
+        stateseqs, mask=mask).astype(int)
+    
+    if runlength:
+        state_onsets = np.pad(np.diff(stateseq_flat).nonzero()[0]+1, (1,0))
+        stateseq_flat = stateseq_flat[state_onsets]
+
+    counts = np.bincount(stateseq_flat, minlength=num_states)
+    frequencies = counts/counts.sum()
+    return frequencies
+
+
 def symmetrize(A):
     """Symmetrize a matrix."""
     return (A + A.swapaxes(-1, -2)) / 2
+
 
 def psd_solve(A, B, diagonal_boost=1e-6):
     """
