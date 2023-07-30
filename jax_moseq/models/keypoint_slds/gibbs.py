@@ -284,7 +284,7 @@ def resample_location(seed, Y, mask, x, h, s, Cd, sigmasq, sigmasq_loc,
     # TODO Parameterize these distributional hyperparameter
     seed = jr.split(seed, mask.shape[0])
     m0 = jnp.zeros(d)
-    S0 = jnp.eye(d) * 1e6
+    S0 = jnp.eye(d) * 1e4
     A = jnp.eye(d)[na]
     B = jnp.zeros(d)[na]
     Q = jnp.eye(d)[na] * sigmasq_loc
@@ -317,7 +317,7 @@ def resample_model(data, seed, states, params, hypparams,
                    resample_global_noise_scale=False, 
                    resample_local_noise_scale=True, 
                    fix_heading=False, verbose=False, jitter=1e-3, 
-                   parallel_message_passing=True, **kwargs):
+                   parallel_message_passing=False, **kwargs):
     """
     Resamples the Keypoint SLDS model given the hyperparameters,
     data, noise prior, current states, and current parameters.
