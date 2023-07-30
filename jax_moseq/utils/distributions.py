@@ -43,7 +43,7 @@ def sample_invwishart(seed,S,nu):
     T = jax.scipy.linalg.solve_triangular(R.T,chol.T,lower=True).T
     return jnp.dot(T,T.T)
 
-@nan_check
+
 def sample_mniw(seed, nu, S, M, K):
     sigma = sample_invwishart(seed, S, nu)
     A = sample_mn(seed, M, sigma, K)
