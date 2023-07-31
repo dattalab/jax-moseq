@@ -18,14 +18,14 @@ def resample_continuous_stateseqs(seed, y, mask, z, s, Ab, Q, Cd, sigmasq, jitte
     ----------
     seed : jr.PRNGKey
         JAX random seed.
-    y : jax.Array of shape (n_sessions, n_timesteps, obs_dim)
+    y : jax.Array of shape (n_recordings, n_timesteps, obs_dim)
         Observations.
-    mask : jax.Array of shape (n_sessions, n_timesteps)
+    mask : jax.Array of shape (n_recordings, n_timesteps)
         Binary indicator, 1=valid frames, 0=invalid frames.
-    z : jax.Array of shape (n_sessions, n_timesteps-n_lags)
+    z : jax.Array of shape (n_recordings, n_timesteps-n_lags)
         Discrete state sequences, taking integer values between [0, n_states),
         for timesteps [n_lags, n_timesteps),
-    s : jax.Array of shape (n_sessions, n_timesteps, obs_dim)
+    s : jax.Array of shape (n_recordings, n_timesteps, obs_dim)
         Observation noise scales.
     Ab : jax.Array of shape (n_states, latent_dim, ar_dim + 1)
         Autoregressive dynamics and bias, where `ar_dim = latent_dim * n_lags`
@@ -46,11 +46,11 @@ def resample_continuous_stateseqs(seed, y, mask, z, s, Ab, Q, Cd, sigmasq, jitte
 
     Returns
     ------
-    x : jax.Array of shape (n_sessions, n_timesteps, latent_dim)
+    x : jax.Array of shape (n_recordings, n_timesteps, latent_dim)
         Posterior sample of latent trajectories.
     """
 
-    n_sessions, latent_dim, obs_dim = y.shape[0], Ab.shape[1], y.shape[-1]
+    n_recordings, latent_dim, obs_dim = y.shape[0], Ab.shape[1], y.shape[-1]
     n_lags = Ab.shape[2] // latent_dim
 
     # TODO Parameterize these distributional hyperparameter
@@ -91,7 +91,7 @@ def resample_continuous_stateseqs(seed, y, mask, z, s, Ab, Q, Cd, sigmasq, jitte
     masked_obs_noise_diag = jnp.ones(obs_dim) * masked_obs_noise
 
     # ==================================================
-    # 4. Apply vectorized Kalman sample to each session
+    # 4. Apply vectorized Kalman sample to each recording
     # Shapes of time-varying parameters going into the Kalman sampler are
     #   ys:     (n_timesteps-n_lags+1, obs_dim), corresponding to timesteps  [L-1, T)
     #   mask:   (n_timesteps-n_lags+1,)
@@ -100,7 +100,7 @@ def resample_continuous_stateseqs(seed, y, mask, z, s, Ab, Q, Cd, sigmasq, jitte
     # ==================================================
     in_axes = (0, 0, 0, 0, na, na, na, na, na, na, na, 0, na, na)
     x = mixed_map(partial(kalman_sample, jitter=jitter, parallel=parallel_message_passing), in_axes)(
-        jr.split(seed, n_sessions), y_, mask_, z,
+        jr.split(seed, n_recordings), y_, mask_, z,
         init_dynamics_mean, init_dynamics_cov,
         A_, b_, Q_, C_, d_, R_,
         masked_dynamics_params, masked_obs_noise_diag,
