@@ -264,7 +264,7 @@ def unbatch(data, keys, bounds):
         Dictionary mapping names to reconstructed time-series
     """     
     data_dict = {}
-    for key in keys:
+    for key in set(list(keys)):
         length = bounds[keys==key,1].max()
         seq = np.zeros((int(length),*data.shape[2:]), dtype=data.dtype)
         for (s,e),d in zip(bounds[keys==key],data[keys==key]):
