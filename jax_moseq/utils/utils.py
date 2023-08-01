@@ -241,7 +241,7 @@ def fit_pca(Y, mask, PCA_fitting_num_frames=1000000,
     return pca
 
 
-def unbatch(data, labels): 
+def unbatch(data, keys, bounds): 
     """
     Invert :py:func:`jax_moseq.utils.batch`
  
@@ -250,9 +250,13 @@ def unbatch(data, labels):
     data: ndarray, shape (num_segs, seg_length, ...)
         Stack of segmented time-series
 
-    labels: tuples (str,int,int)
-        Labels for the rows of ``data`` as tuples with the form
-        (name,start,end)
+    keys: list or array of str, length num_segs
+        Name of the time-series that each segment came from
+
+    bounds: ndarray, shape (num_segs, 2)
+        Start and end times for each segment, reflecting 
+        how the segments were extracted from the original
+        time-series.
 
     Returns
     -------
@@ -260,12 +264,11 @@ def unbatch(data, labels):
         Dictionary mapping names to reconstructed time-series
     """     
     data_dict = {}
-    keys = sorted(set([key for key,start,end in labels]))    
     for key in keys:
-        length = np.max([e for k,s,e in labels if k==key])
+        length = bounds[keys==key,1].max()
         seq = np.zeros((int(length),*data.shape[2:]), dtype=data.dtype)
-        for (k,s,e),d in zip(labels,data):
-            if k==key: seq[s:e] = d[:e-s]
+        for (s,e),d in zip(bounds[keys==key],data[keys==key]):
+            seq[s:e] = d[:e-s]
         data_dict[key] = seq
     return data_dict
 
@@ -308,15 +311,15 @@ def batch(data_dict, keys=None, seg_length=None, seg_overlap=30):
         Binary indicator specifying which elements of ``data`` are not
         padding (``mask==0`` in padded locations)
 
-    keys: list of tuples (str,int), length N
-        Row labels for ``data`` consisting (name, segment_num) pairs
-
+    metadata: tuple (keys, bounds)
+        Metadata for the rows of `data`, as a tuple with an array of keys
+        and an array of (start,end) times.
     """
     if keys is None: keys = sorted(data_dict.keys())
     Ns = [len(data_dict[key]) for key in keys]
     if seg_length is None: seg_length = np.max(Ns)
         
-    stack,mask,labels = [],[],[]
+    stack,mask,keys_out,bounds = [],[],[],[]
     for key,N in zip(keys,Ns):
         for start in range(0,N,seg_length):
             arr = data_dict[key]
@@ -325,11 +328,13 @@ def batch(data_dict, keys=None, seg_length=None, seg_overlap=30):
             padding = np.zeros((pad_length,*arr.shape[1:]), dtype=arr.dtype)
             mask.append(np.hstack([np.ones(end-start),np.zeros(pad_length)]))
             stack.append(np.concatenate([arr[start:end],padding],axis=0))
-            labels.append((key,start,end))
+            keys_out.append(key)
+            bounds.append((start,end))
 
     stack = np.stack(stack)
     mask = np.stack(mask)
-    return stack,mask,labels
+    metadata = (np.array(keys_out), np.array(bounds))
+    return stack,mask,metadata
 
 
 def get_mixed_map_iters():
