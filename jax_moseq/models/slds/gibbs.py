@@ -9,7 +9,7 @@ from jax_moseq.models import arhmm
 
 na = jnp.newaxis
 
-@jax.jit
+@partial(jax.jit, static_argnames=('parallel_message_passing',))
 def resample_continuous_stateseqs(seed, y, mask, z, s, Ab, Q, Cd, sigmasq, jitter=1e-3,
                                   parallel_message_passing=True, **kwargs):
     """Resample the latent trajectories `x`.
@@ -49,7 +49,6 @@ def resample_continuous_stateseqs(seed, y, mask, z, s, Ab, Q, Cd, sigmasq, jitte
     x : jax.Array of shape (n_recordings, n_timesteps, latent_dim)
         Posterior sample of latent trajectories.
     """
-
     n_recordings, latent_dim, obs_dim = y.shape[0], Ab.shape[1], y.shape[-1]
     n_lags = Ab.shape[2] // latent_dim
 

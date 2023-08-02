@@ -18,7 +18,7 @@ from jax_moseq.models.keypoint_slds.alignment import (
 na = jnp.newaxis
 
 
-@jax.jit
+@partial(jax.jit, static_argnames=('parallel_message_passing',))
 def resample_continuous_stateseqs(seed, Y, mask, v, h, s, z, Cd,
                                   sigmasq, Ab, Q, jitter=1e-3, 
                                   parallel_message_passing=True, **kwargs):
