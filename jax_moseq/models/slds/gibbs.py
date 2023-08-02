@@ -4,7 +4,7 @@ import jax.random as jr
 from functools import partial
 
 from jax_moseq.utils.kalman import kalman_sample, ar_to_lds
-from jax_moseq.utils import mixed_map
+from jax_moseq.utils import mixed_map, apply_affine
 from jax_moseq.models import arhmm
 
 na = jnp.newaxis
@@ -186,7 +186,7 @@ def resample_obs_variance(
     sigmasq : jax_array of shape obs_dim
         Unscaled noise.
     """
-    sqerr = compute_squared_error(seed, Y, x, Cd, mask)
+    sqerr = compute_squared_error(Y, x, Cd, mask)
     return resample_obs_variance_from_sqerr(
         seed, sqerr, mask, s, nu_sigma, sigmasq_0
     )
@@ -259,7 +259,7 @@ def resample_scales(seed, Y, x, Cd, sigmasq, nu_s, s_0, **kwargs):
     s : jax array of shape (N, T, obs_dim)
         Noise scales.
     """
-    sqerr = compute_squared_error(seed, Y, x, Cd)
+    sqerr = compute_squared_error(Y, x, Cd)
     return resample_scales_from_sqerr(seed, sqerr, sigmasq, nu_s, s_0)
 
 
@@ -319,15 +319,13 @@ def _resample_spread(seed, degs, variance):
 
 
 @jax.jit
-def compute_squared_error(seed, Y, x, Cd, mask=None):
+def compute_squared_error(Y, x, Cd, mask=None):
     """
     Computes the squared error between model predicted
     and true observations.
 
     Parameters
     ----------
-    seed : jr.PRNGKey
-        JAX random seed.
     Y : jax array of shape (..., obs_dim)
         Observations.
     x : jax array of shape (..., latent_dim)
