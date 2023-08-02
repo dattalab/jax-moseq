@@ -3,22 +3,43 @@ import jax.numpy as jnp
 import jax.random as jr
 from jax import lax
 
-from dynamax.linear_gaussian_ssm.parallel_inference import lgssm_posterior_sample as parallel_lgssm_sample
-from dynamax.linear_gaussian_ssm.inference import (lgssm_posterior_sample as serial_lgssm_sample,
-                                                   ParamsLGSSM,
-                                                   ParamsLGSSMInitial,
-                                                   ParamsLGSSMDynamics,
-                                                   ParamsLGSSMEmissions,)
+from dynamax.linear_gaussian_ssm.parallel_inference import (
+    lgssm_posterior_sample as parallel_lgssm_sample,
+)
+from dynamax.linear_gaussian_ssm.inference import (
+    lgssm_posterior_sample as serial_lgssm_sample,
+    ParamsLGSSM,
+    ParamsLGSSMInitial,
+    ParamsLGSSMDynamics,
+    ParamsLGSSMEmissions,
+)
 
 from jax_moseq.utils.autoregression import get_nlags
+
 na = jnp.newaxis
 
-def kalman_sample(seed, ys, mask, zs, m0, S0, A, B, Q, C, D, Rs,
-                  masked_dynamics_params, masked_obs_noise, jitter=0,
-                  parallel=True):
+
+def kalman_sample(
+    seed,
+    ys,
+    mask,
+    zs,
+    m0,
+    S0,
+    A,
+    B,
+    Q,
+    C,
+    D,
+    Rs,
+    masked_dynamics_params,
+    masked_obs_noise,
+    jitter=0,
+    parallel=True,
+):
     """Run forward-filtering and backward-sampling to draw samples from posterior
-    of a 1st-order dynamic system with autoregressive dynamics of order `n_lags`. 
-    
+    of a 1st-order dynamic system with autoregressive dynamics of order `n_lags`.
+
     Parameters
     ----------
     seed: jr.PRNGKey.
@@ -56,7 +77,7 @@ def kalman_sample(seed, ys, mask, zs, m0, S0, A, B, Q, C, D, Rs,
         during backward-sampling of the continuous states.
     parallel : bool, default=True,
         Use associative scan for Kalman sampling, which is faster on
-        a GPU but has a significantly longer jit time.   
+        a GPU but has a significantly longer jit time.
 
     Returns
     -------
@@ -76,22 +97,28 @@ def kalman_sample(seed, ys, mask, zs, m0, S0, A, B, Q, C, D, Rs,
     # ==============================
     # Given discrete state sequence `zs``, roll-out dynamics so that all params
     # have leading shape (T-L, ...). Apply mask for timesteps [L, -1).
-    dynamics_params=ParamsLGSSMDynamics(
-        weights=jnp.where(mask[:-1,None,None], A[zs], masked_dynamics_params['weights']),
-        bias=jnp.where(mask[:-1,None], B[zs], masked_dynamics_params['bias']),
+    dynamics_params = ParamsLGSSMDynamics(
+        weights=jnp.where(
+            mask[:-1, None, None], A[zs], masked_dynamics_params["weights"]
+        ),
+        bias=jnp.where(mask[:-1, None], B[zs], masked_dynamics_params["bias"]),
         input_weights=jnp.zeros((ar_dim, 0)),
-        cov=jnp.where(mask[:-1,None,None], Q[zs], masked_dynamics_params['cov']),
+        cov=jnp.where(
+            mask[:-1, None, None], Q[zs], masked_dynamics_params["cov"]
+        ),
     )
-    
+
     # ===============================
     # 3. Format emissions parameters
     # ===============================
     # Apply mask to observations, shape (T-L+1, obs_dim, obs_dim)
-    Rs_masked = jnp.where(mask[:,None], Rs, masked_obs_noise)
-    
+    Rs_masked = jnp.where(mask[:, None], Rs, masked_obs_noise)
+
     # Inflate Rs_masked from diagonal covariance (..., obs_dim) to full covariance
-    emissions_params=ParamsLGSSMEmissions(
-        weights=C, bias=D, input_weights=jnp.zeros((obs_dim, 0)),
+    emissions_params = ParamsLGSSMEmissions(
+        weights=C,
+        bias=D,
+        input_weights=jnp.zeros((obs_dim, 0)),
         cov=Rs_masked,
     )
 
@@ -99,45 +126,45 @@ def kalman_sample(seed, ys, mask, zs, m0, S0, A, B, Q, C, D, Rs,
     # 4. Put it all together
     # ===============================
     params = ParamsLGSSM(
-        initial=initial_params, dynamics=dynamics_params, emissions=emissions_params,
+        initial=initial_params,
+        dynamics=dynamics_params,
+        emissions=emissions_params,
     )
-    
+
     def _parallel_kalman(seed, params, ys, jitter):
         # no jitter since error doesn't accumulate sequentially
         return parallel_lgssm_sample(seed, params, ys)
-    
+
     def _serial_kalman(seed, params, ys, jitter):
         return serial_lgssm_sample(seed, params, ys, jitter=jitter)
-    
-    return lax.cond(
-        parallel, _parallel_kalman, _serial_kalman,
-        seed, params, ys, jitter
-    )
 
+    return lax.cond(
+        parallel, _parallel_kalman, _serial_kalman, seed, params, ys, jitter
+    )
 
 
 def ar_to_lds(Ab, Q, Cd=None):
     """
-    Given a linear dynamical system with L'th-order autoregressive 
+    Given a linear dynamical system with L'th-order autoregressive
     dynamics in R^D, returns a system with 1st-order dynamics in R^(D*L)
-    
+
     Parameters
-    ----------  
+    ----------
     Ab: jax array, shape (..., D, D*L + 1)
         AR affine transform
     Q: jax array, shape (..., D, D)
         AR noise covariance
     Cd: jax array, shape (..., D_obs, D+1)
         Observation affine transformation
-    
+
     Returns
     -------
     A_: jax array, shape (..., D*L, D*L)
-    b_: jax array, shape (..., D*L)    
-    Q_: jax array, shape (..., D*L, D*L)  
+    b_: jax array, shape (..., D*L)
+    Q_: jax array, shape (..., D*L, D*L)
     C_: jax array, shape (..., D_obs, D*L)
     d_: jax array, shape (..., D_obs)
-    """    
+    """
     nlags = get_nlags(Ab)
     latent_dim = Ab.shape[-2]
     lds_dim = latent_dim * nlags
@@ -152,15 +179,15 @@ def ar_to_lds(Ab, Q, Cd=None):
     b = Ab[..., -1]
     b_ = jnp.zeros((*dims, lds_dim))
     b_ = b_.at[..., -latent_dim:].set(b)
-    
+
     dims = Q.shape[:-2]
     Q_ = jnp.zeros((*dims, lds_dim, lds_dim))
     Q_ = Q_.at[..., :-latent_dim, :-latent_dim].set(eye * 1e-2)
     Q_ = Q_.at[..., -latent_dim:, -latent_dim:].set(Q)
-    
+
     if Cd is None:
         return A_, b_, Q_
-    
+
     C = Cd[..., :-1]
     C_ = jnp.zeros((*C.shape[:-1], lds_dim))
     C_ = C_.at[..., -latent_dim:].set(C)

@@ -12,13 +12,14 @@
 #
 import os
 import sys
-sys.path.insert(0, os.path.abspath('../../'))
+
+sys.path.insert(0, os.path.abspath("../../"))
 
 
 # -- Project information -----------------------------------------------------
 
-project = 'JAX MoSeq'
-author = 'Caleb Weinreb'
+project = "JAX MoSeq"
+author = "Caleb Weinreb"
 
 
 # -- General configuration ---------------------------------------------------
@@ -32,20 +33,20 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
     "sphinx.ext.mathjax",
-    "autodocsumm"
+    "autodocsumm",
 ]
 
 autodoc_default_options = {
-    'autosummary': True,
+    "autosummary": True,
 }
 
 # Add any paths that contain templates here, relative to this directory.
-templates_path = ['_templates']
+templates_path = ["_templates"]
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
-exclude_patterns = ['_build']
+exclude_patterns = ["_build"]
 
 
 # -- Options for HTML output -------------------------------------------------
@@ -53,12 +54,9 @@ exclude_patterns = ['_build']
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
-html_theme = 'sphinx_rtd_theme'
+html_theme = "sphinx_rtd_theme"
 
-html_theme_options = {
-    'navigation_depth': -1,
-    'titles_only': False
-}
+html_theme_options = {"navigation_depth": -1, "titles_only": False}
 
 autosummary_generate = True
 autodoc_typehints = "description"

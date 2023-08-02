@@ -24,16 +24,16 @@ def discrete_stateseq_log_prob(z, pi, **kwargs):
     log_pz : jax array of shape (..., T - 1)
         Log probability of ``z``.
     """
-    return jnp.log(pi[z[...,:-1],z[...,1:]])
+    return jnp.log(pi[z[..., :-1], z[..., 1:]])
 
 
 def continuous_stateseq_log_prob(x, z, Ab, Q, **kwargs):
     """
-    Calculate the log probability of the trajectory ``x`` at each time 
+    Calculate the log probability of the trajectory ``x`` at each time
     step, given switching autoregressive (AR) parameters
 
     Parameters
-    ----------  
+    ----------
     x : jax array of shape (..., T, latent_dim)
         Latent trajectories.
     z : jax_array of shape (..., T - n_lags)
@@ -82,21 +82,20 @@ def log_joint_likelihood(x, mask, z, pi, Ab, Q, **kwargs):
         total log probability.
     """
     ll = {}
-    
+
     log_pz = discrete_stateseq_log_prob(z, pi)
     log_px = continuous_stateseq_log_prob(x, z, Ab, Q)
-    
+
     nlags = get_nlags(Ab)
-    ll['z'] = (log_pz * mask[..., nlags + 1:]).sum()
-    ll['x'] = (log_px * mask[..., nlags:]).sum()
+    ll["z"] = (log_pz * mask[..., nlags + 1 :]).sum()
+    ll["x"] = (log_px * mask[..., nlags:]).sum()
     return ll
 
 
-def model_likelihood(data, states, params,
-                     hypparams=None, **kwargs):
+def model_likelihood(data, states, params, hypparams=None, **kwargs):
     """
     Convenience class that invokes :py:func:`jax_moseq.models.arhmm.log_prob.log_joint_likelihood`.
-    
+
     Parameters
     ----------
     data : dict
@@ -125,20 +124,19 @@ def state_cross_likelihoods(params, states, mask, **kwargs):
     given the dynamics of each other state. See page 33 of the
     supplement (Wiltchsko, 2015) for a formal definition.
     """
-    x, Ab, Q = jax.device_put((states['x'],params['Ab'],params['Q']))
+    x, Ab, Q = jax.device_put((states["x"], params["Ab"], params["Q"]))
     log_likelihoods = jax.lax.map(partial(ar_log_likelihood, x), (Ab, Q))
-    
-    nlags = mask.shape[1] - log_likelihoods.shape[2]
-    log_likelihoods = np.moveaxis(log_likelihoods,0,2)[mask[:,nlags:]>0]
 
-    z = states['z'][mask[:,nlags:]>0]
-    changepoints = np.diff(z).nonzero()[0]+1
+    nlags = mask.shape[1] - log_likelihoods.shape[2]
+    log_likelihoods = np.moveaxis(log_likelihoods, 0, 2)[mask[:, nlags:] > 0]
+
+    z = states["z"][mask[:, nlags:] > 0]
+    changepoints = np.diff(z).nonzero()[0] + 1
     counts = np.bincount(z[changepoints])
-    
+
     n_states = log_likelihoods.shape[1]
-    cross_likelihoods = np.zeros((n_states,n_states))
+    cross_likelihoods = np.zeros((n_states, n_states))
     for j in range(n_states):
-        ll = log_likelihoods[z==j].sum(0)
-        cross_likelihoods[j] = (ll-ll[j])/(counts[j] + 1e-6)
+        ll = log_likelihoods[z == j].sum(0)
+        cross_likelihoods[j] = (ll - ll[j]) / (counts[j] + 1e-6)
     return cross_likelihoods
-    

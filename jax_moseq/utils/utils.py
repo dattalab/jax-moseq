@@ -10,7 +10,6 @@ from math import ceil
 _MIXED_MAP_ITERS = 1
 
 
-
 def concatenate_stateseqs(stateseqs, mask=None):
     """
     Concatenate state sequences, optionally applying a mask.
@@ -23,28 +22,29 @@ def concatenate_stateseqs(stateseqs, mask=None):
 
     mask: ndarray of shape (..., >=t), default=None
         Binary indicator for which elements of `stateseqs` are valid,
-        used in the case where `stateseqs` is an ndarray. If `mask` 
-        contains more time-points than `stateseqs`, the initial extra 
+        used in the case where `stateseqs` is an ndarray. If `mask`
+        contains more time-points than `stateseqs`, the initial extra
         time-points will be ignored.
 
     Returns
     -------
     stateseqs_flat: ndarray
-        1d array containing all state sequences 
+        1d array containing all state sequences
     """
     if isinstance(stateseqs, dict):
         stateseq_flat = np.hstack(list(stateseqs.values()))
     elif isinstance(stateseqs, list):
         stateseq_flat = np.hstack(stateseqs)
     elif mask is not None:
-        stateseq_flat = stateseqs[mask[:,-stateseqs.shape[1]:]>0]
-    else: stateseq_flat = stateseqs.flatten()
+        stateseq_flat = stateseqs[mask[:, -stateseqs.shape[1] :] > 0]
+    else:
+        stateseq_flat = stateseqs.flatten()
     return stateseq_flat
 
 
 def get_durations(stateseqs, mask=None):
     """
-    Get durations for a batch of state sequences. 
+    Get durations for a batch of state sequences.
 
     Parameters
     ----------
@@ -54,8 +54,8 @@ def get_durations(stateseqs, mask=None):
 
     mask: ndarray of shape (..., >=t), default=None
         Binary indicator for which elements of `stateseqs` are valid,
-        used in the case where `stateseqs` is an ndarray. If `mask` 
-        contains more time-points than `stateseqs`, the initial extra 
+        used in the case where `stateseqs` is an ndarray. If `mask`
+        contains more time-points than `stateseqs`, the initial extra
         time-points will be ignored.
 
     Returns
@@ -73,14 +73,14 @@ def get_durations(stateseqs, mask=None):
     array([2, 3, 1, 3, 1])
     """
     stateseq_flat = concatenate_stateseqs(stateseqs, mask=mask).astype(int)
-    stateseq_padded = np.hstack([[-1],stateseq_flat,[-1]])
+    stateseq_padded = np.hstack([[-1], stateseq_flat, [-1]])
     changepoints = np.diff(stateseq_padded).nonzero()[0]
-    return changepoints[1:]-changepoints[:-1]
+    return changepoints[1:] - changepoints[:-1]
 
 
 def get_frequencies(stateseqs, mask=None, num_states=None, runlength=True):
     """
-    Get state frequencies for a batch of state sequences. 
+    Get state frequencies for a batch of state sequences.
 
     Parameters
     ----------
@@ -90,8 +90,8 @@ def get_frequencies(stateseqs, mask=None, num_states=None, runlength=True):
 
     mask: ndarray of shape (..., >=t), default=None
         Binary indicator for which elements of `stateseqs` are valid,
-        used in the case where `stateseqs` is an ndarray. If `mask` 
-        contains more time-points than `stateseqs`, the initial extra 
+        used in the case where `stateseqs` is an ndarray. If `mask`
+        contains more time-points than `stateseqs`, the initial extra
         time-points will be ignored.
 
     num_states: int, default=None
@@ -116,16 +116,15 @@ def get_frequencies(stateseqs, mask=None, num_states=None, runlength=True):
     array([0.2, 0.4, 0.2, 0.2])
     >>> get_frequencies(stateseqs, runlength=False)
     array([0.3, 0.3, 0.3, 0.1])
-    """    
-    stateseq_flat = concatenate_stateseqs(
-        stateseqs, mask=mask).astype(int)
-    
+    """
+    stateseq_flat = concatenate_stateseqs(stateseqs, mask=mask).astype(int)
+
     if runlength:
-        state_onsets = np.pad(np.diff(stateseq_flat).nonzero()[0]+1, (1,0))
+        state_onsets = np.pad(np.diff(stateseq_flat).nonzero()[0] + 1, (1, 0))
         stateseq_flat = stateseq_flat[state_onsets]
 
     counts = np.bincount(stateseq_flat, minlength=num_states)
-    frequencies = counts/counts.sum()
+    frequencies = counts / counts.sum()
     return frequencies
 
 
@@ -136,12 +135,12 @@ def symmetrize(A):
 
 def psd_solve(A, B, diagonal_boost=1e-6):
     """
-    Solves the linear system Ax=B, assuming A is positive semi-definite. 
-    
-    Uses Cholesky decomposition for improved numerical stability and 
+    Solves the linear system Ax=B, assuming A is positive semi-definite.
+
+    Uses Cholesky decomposition for improved numerical stability and
     efficiency. A is symmetrized and diagonal elements are boosted by
     ``diagonal_boost`` to ensure positive definiteness.
-    
+
     Parameters
     ----------
     A: jax array, shape (n,n)
@@ -157,6 +156,7 @@ def psd_solve(A, B, diagonal_boost=1e-6):
     L, lower = cho_factor(A, lower=True)
     x = cho_solve((L, lower), B)
     return x
+
 
 def psd_inv(A, diagonal_boost=1e-6):
     """
@@ -179,48 +179,48 @@ def psd_inv(A, diagonal_boost=1e-6):
     return symmetrize(Ainv)
 
 
-def jax_io(fn): 
+def jax_io(fn):
     """
     Converts a function involving numpy arrays to one that inputs and
     outputs jax arrays.
     """
     return lambda *args, **kwargs: jax.device_put(
-        fn(*jax.device_get(args), **jax.device_get(kwargs)))
+        fn(*jax.device_get(args), **jax.device_get(kwargs))
+    )
 
 
 def device_put_as_scalar(x):
-    as_scalar = lambda arr: arr.item() if arr.shape==() else arr
+    as_scalar = lambda arr: arr.item() if arr.shape == () else arr
     return jax.tree_map(as_scalar, jax.device_put(x))
 
 
 def apply_affine(x, Ab):
-    return jnp.einsum('...ij, ...j->...i', Ab, pad_affine(x))
+    return jnp.einsum("...ij, ...j->...i", Ab, pad_affine(x))
 
 
 def pad_affine(x):
     """
     Pad ``x`` with 1's so that it can be affine transformed with matrix
-    multiplication. 
+    multiplication.
     """
     padding = jnp.ones((*x.shape[:-1], 1))
     xpadded = jnp.concatenate((x, padding), axis=-1)
     return xpadded
 
 
-def fit_pca(Y, mask, PCA_fitting_num_frames=1000000,
-            verbose=False, **kwargs):
+def fit_pca(Y, mask, PCA_fitting_num_frames=1000000, verbose=False, **kwargs):
     """
     Fit a PCA model to transformed keypoint coordinates.
 
     Parameters
-    ----------   
+    ----------
     Y: jax array, shape (..., d)
         Keypoint coordinates
     mask: jax array
         Binary indicator for which elements of ``Y`` are valid
     PCA_fitting_num_frames: int, default=1000000
         Maximum number of frames to use for PCA. Frames will be sampled
-        randomly if the input data exceed this size. 
+        randomly if the input data exceed this size.
     verbose: bool, default=False
         Whether to print the number of sampled frames.
     Returns
@@ -236,15 +236,15 @@ def fit_pca(Y, mask, PCA_fitting_num_frames=1000000,
     Y_sample = np.array(Y_flat)[sample]
 
     if verbose:
-        print(f'PCA: Fitting PCA model to {N_sample} data points')
+        print(f"PCA: Fitting PCA model to {N_sample} data points")
     pca = PCA().fit(Y_sample)
     return pca
 
 
-def unbatch(data, keys, bounds): 
+def unbatch(data, keys, bounds):
     """
     Invert :py:func:`jax_moseq.utils.batch`
- 
+
     Parameters
     ----------
     data: ndarray, shape (num_segs, seg_length, ...)
@@ -254,7 +254,7 @@ def unbatch(data, keys, bounds):
         Name of the time-series that each segment came from
 
     bounds: ndarray, shape (num_segs, 2)
-        Start and end times for each segment, reflecting 
+        Start and end times for each segment, reflecting
         how the segments were extracted from the original
         time-series.
 
@@ -262,13 +262,13 @@ def unbatch(data, keys, bounds):
     -------
     data_dict: dict
         Dictionary mapping names to reconstructed time-series
-    """     
+    """
     data_dict = {}
     for key in set(list(keys)):
-        length = bounds[keys==key,1].max()
-        seq = np.zeros((int(length),*data.shape[2:]), dtype=data.dtype)
-        for (s,e),d in zip(bounds[keys==key],data[keys==key]):
-            seq[s:e] = d[:e-s]
+        length = bounds[keys == key, 1].max()
+        seq = np.zeros((int(length), *data.shape[2:]), dtype=data.dtype)
+        for (s, e), d in zip(bounds[keys == key], data[keys == key]):
+            seq[s:e] = d[: e - s]
         data_dict[key] = seq
     return data_dict
 
@@ -276,7 +276,7 @@ def unbatch(data, keys, bounds):
 def batch(data_dict, keys=None, seg_length=None, seg_overlap=30):
     """
     Stack time-series data of different lengths into a single array for
-    batch processing, optionally breaking up the data into fixed length 
+    batch processing, optionally breaking up the data into fixed length
     segments. Data is 0-padded so that the stacked array isn't ragged.
 
     Parameters
@@ -284,18 +284,18 @@ def batch(data_dict, keys=None, seg_length=None, seg_overlap=30):
     data_dict: dict {str : ndarray}
         Dictionary mapping names to ndarrays, where the first dim
         represents time. All data arrays must have the same shape except
-        for the first dim. 
+        for the first dim.
 
     keys: list of str, default=None
-        Optional list of names specifying which datasets to include in 
-        the output and what order to put them in. Each name must be a 
-        key in ``data_dict``. If ``keys=None``, names will be sorted 
+        Optional list of names specifying which datasets to include in
+        the output and what order to put them in. Each name must be a
+        key in ``data_dict``. If ``keys=None``, names will be sorted
         alphabetically.
 
     seg_length: int, default=None
-        Break each time-series into segments of this length. If 
+        Break each time-series into segments of this length. If
         ``seg_length=None``, the final stacked array will be as long
-        as the longest time-series. 
+        as the longest time-series.
 
     seg_overlap: int, default=30
         Amount of overlap between segments. For example, setting
@@ -315,26 +315,30 @@ def batch(data_dict, keys=None, seg_length=None, seg_overlap=30):
         Metadata for the rows of `data`, as a tuple with an array of keys
         and an array of (start,end) times.
     """
-    if keys is None: keys = sorted(data_dict.keys())
+    if keys is None:
+        keys = sorted(data_dict.keys())
     Ns = [len(data_dict[key]) for key in keys]
-    if seg_length is None: seg_length = np.max(Ns)
-        
-    stack,mask,keys_out,bounds = [],[],[],[]
-    for key,N in zip(keys,Ns):
-        for start in range(0,N,seg_length):
+    if seg_length is None:
+        seg_length = np.max(Ns)
+
+    stack, mask, keys_out, bounds = [], [], [], []
+    for key, N in zip(keys, Ns):
+        for start in range(0, N, seg_length):
             arr = data_dict[key]
-            end = min(start+seg_length+seg_overlap, N)
-            pad_length = seg_length+seg_overlap-(end-start)
-            padding = np.zeros((pad_length,*arr.shape[1:]), dtype=arr.dtype)
-            mask.append(np.hstack([np.ones(end-start),np.zeros(pad_length)]))
-            stack.append(np.concatenate([arr[start:end],padding],axis=0))
+            end = min(start + seg_length + seg_overlap, N)
+            pad_length = seg_length + seg_overlap - (end - start)
+            padding = np.zeros((pad_length, *arr.shape[1:]), dtype=arr.dtype)
+            mask.append(
+                np.hstack([np.ones(end - start), np.zeros(pad_length)])
+            )
+            stack.append(np.concatenate([arr[start:end], padding], axis=0))
             keys_out.append(key)
-            bounds.append((start,end))
+            bounds.append((start, end))
 
     stack = np.stack(stack)
     mask = np.stack(mask)
     metadata = (np.array(keys_out), np.array(bounds))
-    return stack,mask,metadata
+    return stack, mask, metadata
 
 
 def get_mixed_map_iters():
@@ -350,7 +354,6 @@ def set_mixed_map_iters(iters):
     _MIXED_MAP_ITERS = iters
 
 
-
 def _reshape_args(args, axes):
     """Reshape args to (lax.map dim, vmap dim, [other dims])"""
     mm_iters = get_mixed_map_iters()
@@ -358,7 +361,7 @@ def _reshape_args(args, axes):
     vmap_size = ceil(axis_size / mm_iters)
     lmap_size = ceil(axis_size / vmap_size)
     padding = vmap_size * lmap_size - axis_size
-    
+
     def _reshape(a, axis):
         if axis > 0:
             a = jnp.moveaxis(a, axis, 0)
@@ -366,39 +369,44 @@ def _reshape_args(args, axes):
             padding_array = jnp.zeros((padding, *a.shape[1:]), dtype=a.dtype)
             a = jnp.concatenate((a, padding_array))
         return a.reshape(lmap_size, vmap_size, *a.shape[1:])
-    
-    args = [_reshape(arg,axis) for arg,axis in zip(args, axes)]
+
+    args = [_reshape(arg, axis) for arg, axis in zip(args, axes)]
     return args, axis_size
 
 
 def _reshape_outputs(outputs, axes, axis_size):
     """Reshape outputs from (lax.map dim, vmap dim, [other dims])"""
+
     def _reshape(a, axis):
         a = a.reshape(-1, *a.shape[2:])[:axis_size]
         if axis > 0:
             a = jnp.moveaxis(a, 0, axis)
         return a
 
-    outputs = [_reshape(out,axis) for out,axis in zip(outputs, axes)]
-    if len(outputs)==1: outputs = outputs[0]
+    outputs = [_reshape(out, axis) for out, axis in zip(outputs, axes)]
+    if len(outputs) == 1:
+        outputs = outputs[0]
     return outputs
 
 
 def _partial(fun, other_args, mapped_argnums, other_argnums):
     def partial_fun(mapped_args):
         args = {}
-        for i,arg in zip(mapped_argnums, mapped_args): args[i] = arg
-        for i,arg in zip(other_argnums, other_args): args[i] = arg
+        for i, arg in zip(mapped_argnums, mapped_args):
+            args[i] = arg
+        for i, arg in zip(other_argnums, other_args):
+            args[i] = arg
         args = [args[i] for i in range(len(args))]
         return fun(*args)
+
     return partial_fun
 
 
 def _sort_args(args, in_axes):
     """Sort arguments into mapped and unmapped arguments."""
-    mapped_args, mapped_argnums = [],[]
-    other_args, other_argnums = [],[]
-    for i,(arg,axis) in enumerate(zip(args, in_axes)):
+    mapped_args, mapped_argnums = [], []
+    other_args, other_argnums = [], []
+    for i, (arg, axis) in enumerate(zip(args, in_axes)):
         if axis is not None:
             mapped_args.append(arg)
             mapped_argnums.append(i)
@@ -410,34 +418,45 @@ def _sort_args(args, in_axes):
 
 def mixed_map(fun, in_axes=None, out_axes=None):
     """
-    Combine jax.vmap and jax.lax.map for parallelization. 
-    
-    This function is similar to `jax.vmap`, except that it combines 
-    `jax.vmap` with `jax.lax.map` to prevent OOM errors. Given an 
-    axis size of N to map over, `jax.vmap` is applied serially to 
-    chunks of size `ceil(N/iters)`, where `iters` is a global variable 
+    Combine jax.vmap and jax.lax.map for parallelization.
+
+    This function is similar to `jax.vmap`, except that it combines
+    `jax.vmap` with `jax.lax.map` to prevent OOM errors. Given an
+    axis size of N to map over, `jax.vmap` is applied serially to
+    chunks of size `ceil(N/iters)`, where `iters` is a global variable
     specified by :py:func:`jax_moseq.utils.set_mixed_map_iters`.
-    """    
+    """
+
     @functools.wraps(fun)
     def mixed_map_f(*args):
-        
         nonlocal in_axes
         nonlocal out_axes
-        
-        if in_axes is None: in_axes = tuple([0]*len(args))
-        else: assert len(in_axes)==len(args), (
-            '`in_axes` should be a tuple with the same length as the number of arguments')
 
-        mapped_args, mapped_argnums, other_args, other_argnums = _sort_args(args, in_axes)
-        mapped_args, axis_size = _reshape_args(mapped_args, [in_axes[i] for i in mapped_argnums])
+        if in_axes is None:
+            in_axes = tuple([0] * len(args))
+        else:
+            assert len(in_axes) == len(
+                args
+            ), "`in_axes` should be a tuple with the same length as the number of arguments"
+
+        mapped_args, mapped_argnums, other_args, other_argnums = _sort_args(
+            args, in_axes
+        )
+        mapped_args, axis_size = _reshape_args(
+            mapped_args, [in_axes[i] for i in mapped_argnums]
+        )
         f = _partial(fun, other_args, mapped_argnums, other_argnums)
         outputs = jax.lax.map(jax.vmap(f), mapped_args)
 
-        if not isinstance(outputs, tuple) or isinstance(outputs, list): outputs = (outputs,)
-        if out_axes is None: out_axes = tuple([0]*len(outputs))
-        else: assert len(out_axes)==len(outputs), (
-            '`out_axes` should be a tuple with the same length as the number of function outputs')
-        
+        if not isinstance(outputs, tuple) or isinstance(outputs, list):
+            outputs = (outputs,)
+        if out_axes is None:
+            out_axes = tuple([0] * len(outputs))
+        else:
+            assert len(out_axes) == len(
+                outputs
+            ), "`out_axes` should be a tuple with the same length as the number of function outputs"
+
         outputs = _reshape_outputs(outputs, out_axes, axis_size)
         return outputs
 

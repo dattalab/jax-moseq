@@ -66,7 +66,9 @@ def obs_log_prob(Y, x, s, Cd, sigmasq, **kwargs):
 
 
 @jax.jit
-def log_joint_likelihood(Y, mask, x, s, z, pi, Ab, Q, Cd, sigmasq, s_0, nu_s, **kwargs):
+def log_joint_likelihood(
+    Y, mask, x, s, z, pi, Ab, Q, Cd, sigmasq, s_0, nu_s, **kwargs
+):
     """
     Calculate the total log probability for each latent state.
 
@@ -110,15 +112,15 @@ def log_joint_likelihood(Y, mask, x, s, z, pi, Ab, Q, Cd, sigmasq, s_0, nu_s, **
     log_pY = obs_log_prob(Y, x, s, Cd, sigmasq)
     log_ps = scale_log_prob(s, s_0, nu_s)
 
-    ll['Y'] = (log_pY * mask).sum()
-    ll['s'] = (log_ps * mask[..., na]).sum()
+    ll["Y"] = (log_pY * mask).sum()
+    ll["s"] = (log_ps * mask[..., na]).sum()
     return ll
 
 
 def model_likelihood(data, states, params, hypparams, **kwargs):
     """
     Convenience class that invokes `log_joint_likelihood`.
-    
+
     Parameters
     ----------
     data : dict
@@ -138,5 +140,6 @@ def model_likelihood(data, states, params, hypparams, **kwargs):
         Dictionary mapping state variable name to its
         total log probability.
     """
-    return log_joint_likelihood(**data, **states, **params,
-                                **hypparams['obs_hypparams'])
+    return log_joint_likelihood(
+        **data, **states, **params, **hypparams["obs_hypparams"]
+    )
