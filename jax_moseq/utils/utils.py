@@ -8,6 +8,7 @@ import functools
 from math import ceil
 
 _MIXED_MAP_ITERS = 1
+_MIXED_MAP_GPUS = 1
 
 
 def concatenate_stateseqs(stateseqs, mask=None):
@@ -354,13 +355,29 @@ def set_mixed_map_iters(iters):
     _MIXED_MAP_ITERS = iters
 
 
+def get_mixed_map_gpus():
+    """Get the number of GPUs to use for jax.pmap in
+    :py:func:`jax_moseq.utils.mixed_map`."""
+    return _MIXED_MAP_GPUS
+
+
+def set_mixed_map_gpus(gpus):
+    """Set the number of GPUs to use for jax.pmap in
+    :py:func:`jax_moseq.utils.mixed_map`."""
+    global _MIXED_MAP_GPUS
+    _MIXED_MAP_GPUS = gpus
+
+
 def _reshape_args(args, axes):
-    """Reshape args to (lax.map dim, vmap dim, [other dims])"""
-    mm_iters = get_mixed_map_iters()
+    """Reshape args to (pmap dim, lax.map dim, vmap dim, [other dims])"""
+    n_iters = get_mixed_map_iters()
+    n_gpus = get_mixed_map_gpus()
     axis_size = args[0].shape[axes[0]]
-    vmap_size = ceil(axis_size / mm_iters)
-    lmap_size = ceil(axis_size / vmap_size)
-    padding = vmap_size * lmap_size - axis_size
+
+    vmap_size = ceil(axis_size / n_iters / n_gpus)
+    lmap_size = ceil(axis_size / vmap_size / n_gpus)
+    pmap_size = ceil(axis_size / vmap_size / lmap_size)
+    padding = vmap_size * lmap_size * pmap_size - axis_size
 
     def _reshape(a, axis):
         if axis > 0:
@@ -368,7 +385,7 @@ def _reshape_args(args, axes):
         if padding > 0:
             padding_array = jnp.zeros((padding, *a.shape[1:]), dtype=a.dtype)
             a = jnp.concatenate((a, padding_array))
-        return a.reshape(lmap_size, vmap_size, *a.shape[1:])
+        return a.reshape(pmap_size, lmap_size, vmap_size, *a.shape[1:])
 
     args = [_reshape(arg, axis) for arg, axis in zip(args, axes)]
     return args, axis_size
@@ -378,7 +395,7 @@ def _reshape_outputs(outputs, axes, axis_size):
     """Reshape outputs from (lax.map dim, vmap dim, [other dims])"""
 
     def _reshape(a, axis):
-        a = a.reshape(-1, *a.shape[2:])[:axis_size]
+        a = a.reshape(-1, *a.shape[3:])[:axis_size]
         if axis > 0:
             a = jnp.moveaxis(a, 0, axis)
         return a
@@ -418,13 +435,20 @@ def _sort_args(args, in_axes):
 
 def mixed_map(fun, in_axes=None, out_axes=None):
     """
-    Combine jax.vmap and jax.lax.map for parallelization.
+    Combine jax.pmap, jax.vmap and jax.lax.map for parallelization.
 
-    This function is similar to `jax.vmap`, except that it combines
-    `jax.vmap` with `jax.lax.map` to prevent OOM errors. Given an
-    axis size of N to map over, `jax.vmap` is applied serially to
-    chunks of size `ceil(N/iters)`, where `iters` is a global variable
-    specified by :py:func:`jax_moseq.utils.set_mixed_map_iters`.
+    This function is similar to `jax.vmap`, except that it mixes together
+    `jax.pmap`, `jax.vmap` and `jax.lax.map` to prevent OOM errors and allow
+    for parallelization across multiple GPUs. The behavior is determined by
+    the global variables `_MIXED_MAP_ITERS` and `_MIXED_MAP_GPUS`, which can be
+    set using :py:func:`jax_moseq.utils.set_mixed_map_iters` and
+    py:func:`jax_moseq.utils.set_mixed_map_gpus`.
+
+    Given an axis size of N to map, the data is padded such that the axis size
+    is a multiple of the number of `_MIXED_MAP_ITERS * _MIXED_MAP_GPUS`. The
+    data is then divided across the `_MIXED_MAP_GPUS` GPUs using `jax.pmap`,
+    and processed serially in `_MIXED_MAP_ITERS` chunks using `jax.lax.map`,
+    where each chunk is processed in parallel using `jax.vmap`.
     """
 
     @functools.wraps(fun)
