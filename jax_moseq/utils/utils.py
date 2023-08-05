@@ -375,9 +375,9 @@ def _reshape_args(args, axes):
     axis_size = args[0].shape[axes[0]]
 
     vmap_size = ceil(axis_size / n_iters / n_gpus)
-    lmap_size = ceil(axis_size / vmap_size / n_gpus)
-    pmap_size = ceil(axis_size / vmap_size / lmap_size)
-    padding = vmap_size * lmap_size * pmap_size - axis_size
+    pmap_size = ceil(axis_size / vmap_size / n_iters)
+    lmap_size = ceil(axis_size / vmap_size / pmap_size)
+    padding = vmap_size * pmap_size * lmap_size - axis_size
 
     def _reshape(a, axis):
         if axis > 0:
@@ -385,7 +385,7 @@ def _reshape_args(args, axes):
         if padding > 0:
             padding_array = jnp.zeros((padding, *a.shape[1:]), dtype=a.dtype)
             a = jnp.concatenate((a, padding_array))
-        return a.reshape(pmap_size, lmap_size, vmap_size, *a.shape[1:])
+        return a.reshape(lmap_size, pmap_size, vmap_size, *a.shape[1:])
 
     args = [_reshape(arg, axis) for arg, axis in zip(args, axes)]
     return args, axis_size
