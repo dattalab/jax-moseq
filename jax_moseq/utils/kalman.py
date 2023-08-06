@@ -119,7 +119,7 @@ def kalman_sample(
         weights=C,
         bias=D,
         input_weights=jnp.zeros((obs_dim, 0)),
-        cov=Rs_masked,
+        cov=jax.vmap(jnp.diag)(Rs_masked),
     )
 
     # ===============================
