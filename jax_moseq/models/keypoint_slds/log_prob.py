@@ -10,16 +10,16 @@ na = jnp.newaxis
 
 def location_log_prob(v, sigmasq_loc):
     """
-    Calculate the log probability of the centroid location at each 
+    Calculate the log probability of the centroid location at each
     time-step, given the prior on centroid movement.
-    
+
     Parameters
     ----------
     v : jax array of shape (..., T, d)
         Centroid positions.
     sigmasq_loc : float
         Assumed variance in centroid displacements.
-   
+
     Returns
     -------
     log_pv: jax array of shape (..., T - 1)
@@ -36,7 +36,7 @@ def obs_log_prob(Y, x, v, h, s, Cd, sigmasq, **kwargs):
     Calculate the log probability of keypoint coordinates at each
     time-step, given continuous latent trajectories, centroids, heading
     angles, noise scales, and observation parameters.
-    
+
     Parameters
     ----------
     Y : jax array of shape (..., k, d)
@@ -55,20 +55,36 @@ def obs_log_prob(Y, x, v, h, s, Cd, sigmasq, **kwargs):
         Unscaled noise.
     **kwargs : dict
         Overflow, for convenience.
-    
+
     Returns
     -------
     log_pY: jax array of shape (..., k)
         Log probability of `Y`.
     """
     Y_bar = estimate_coordinates(x, v, h, Cd)
-    sigma = jnp.broadcast_to(jnp.sqrt(s * sigmasq)[...,na], Y.shape)
+    sigma = jnp.broadcast_to(jnp.sqrt(s * sigmasq)[..., na], Y.shape)
     return tfd.MultivariateNormalDiag(Y_bar, sigma).log_prob(Y)
 
 
 @jax.jit
-def log_joint_likelihood(Y, mask, x, v, h, s, z, pi, Ab, Q, Cd,
-                         sigmasq, sigmasq_loc, s_0, nu_s, **kwargs):
+def log_joint_likelihood(
+    Y,
+    mask,
+    x,
+    v,
+    h,
+    s,
+    z,
+    pi,
+    Ab,
+    Q,
+    Cd,
+    sigmasq,
+    sigmasq_loc,
+    s_0,
+    nu_s,
+    **kwargs
+):
     """
     Calculate the total log probability for each latent state.
 
@@ -119,16 +135,16 @@ def log_joint_likelihood(Y, mask, x, v, h, s, z, pi, Ab, Q, Cd,
     log_ps = slds.scale_log_prob(s, s_0, nu_s)
     log_pv = location_log_prob(v, sigmasq_loc)
 
-    ll['Y'] = (log_pY * mask[..., na]).sum()
-    ll['s'] = (log_ps * mask[..., na]).sum()
-    ll['v'] = (log_pv * mask[...,1:]).sum()
+    ll["Y"] = (log_pY * mask[..., na]).sum()
+    ll["s"] = (log_ps * mask[..., na]).sum()
+    ll["v"] = (log_pv * mask[..., 1:]).sum()
     return ll
 
 
 def model_likelihood(data, states, params, hypparams, noise_prior, **kwargs):
     """
     Convenience class that invokes `log_joint_likelihood`.
-    
+
     Parameters
     ----------
     data : dict
@@ -150,7 +166,11 @@ def model_likelihood(data, states, params, hypparams, noise_prior, **kwargs):
         Dictionary mapping state variable name to its
         total log probability.
     """
-    return log_joint_likelihood(**data, **states, **params,
-                                **hypparams['obs_hypparams'],
-                                **hypparams['cen_hypparams'],
-                                s_0=noise_prior)
+    return log_joint_likelihood(
+        **data,
+        **states,
+        **params,
+        **hypparams["obs_hypparams"],
+        **hypparams["cen_hypparams"],
+        s_0=noise_prior
+    )

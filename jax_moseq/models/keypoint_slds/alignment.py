@@ -15,7 +15,7 @@ def to_vanilla_slds(Y, v, h, s, Cd, sigmasq, **kwargs):
     this function returns the (relevant subset of the) observations,
     states, and params for an equivalent SLDS that directly maps the
     latent trajectories to flattened and aligned keypoint observations.
-    
+
     Parameters
     ----------
     Y : jax array of shape (..., k, d)
@@ -32,7 +32,7 @@ def to_vanilla_slds(Y, v, h, s, Cd, sigmasq, **kwargs):
         Unscaled noise.
     **kwargs : dict
         Overflow, for convenience.
-        
+
     Returns
     -------
     Y : jax array of shape (..., k * d)
@@ -65,7 +65,7 @@ def to_vanilla_slds(Y, v, h, s, Cd, sigmasq, **kwargs):
 
 def estimate_coordinates(x, v, h, Cd, **kwargs):
     """
-    Estimate keypoint coordinates obtained from projecting the 
+    Estimate keypoint coordinates obtained from projecting the
     latent state ``x`` into keypoint-space (via ``Cd``) and then
     rotating and translating by ``h`` and ``v`` respectively
 
@@ -121,7 +121,7 @@ def estimate_aligned(x, Cd, k):
     # Reshape keypoints
     batch_shape = x.shape[:-1]
     y = y.reshape(*batch_shape, k - 1, -1)
-    Gamma = center_embedding(k) 
+    Gamma = center_embedding(k)
     return Gamma @ y
 
 
@@ -130,7 +130,7 @@ def rigid_transform(Y, v, h):
     """
     Apply the rigid transform consisting of rotation by h
     and translation by v to a set of keypoint observations.
-    
+
     Parameters
     ----------
     Y : jax array of shape (..., k, d)
@@ -139,7 +139,7 @@ def rigid_transform(Y, v, h):
         Centroid positions.
     h : jax array
         Heading angles.
-          
+
     Returns
     -------
     Y_transformed: jax array of shape (..., k, d)
@@ -154,7 +154,7 @@ def inverse_rigid_transform(Y, v, h):
     Apply the inverse of the rigid transform consisting of
     rotation by h and translation by v to a set of keypoint
     observations.
-    
+
     Parameters
     ----------
     Y : jax array of shape (..., k, d)
@@ -163,7 +163,7 @@ def inverse_rigid_transform(Y, v, h):
         Centroid positions.
     h : jax array
         Heading angles.
-          
+
     Returns
     -------
     Y_transformed: jax array of shape (..., k, d)
@@ -174,9 +174,9 @@ def inverse_rigid_transform(Y, v, h):
 
 def center_embedding(k):
     """
-    Generates a matrix ``Gamma`` that maps from a (k-1)-dimensional 
+    Generates a matrix ``Gamma`` that maps from a (k-1)-dimensional
     vector space  to the space of k-tuples with zero mean
-    
+
     Parameters
     ----------
     k : int
@@ -186,9 +186,9 @@ def center_embedding(k):
     -------
     Gamma: jax array of shape (k, k - 1)
         Matrix to map to centered embedded space.
-    """  
+    """
     # using numpy.linalg.svd because jax version crashes on windows
-    return jnp.array(np.linalg.svd(np.eye(k) - np.ones((k, k)) / k)[0][:,:-1])
+    return jnp.array(np.linalg.svd(np.eye(k) - np.ones((k, k)) / k)[0][:, :-1])
 
 
 def apply_rotation(Y, h):
@@ -209,14 +209,14 @@ def apply_rotation(Y, h):
     """
     d = Y.shape[-1]
     rot_matrix = angle_to_rotation_matrix(h, d)
-    return jnp.einsum('...kj,...ij->...ki', Y, rot_matrix)
+    return jnp.einsum("...kj,...ij->...ki", Y, rot_matrix)
 
 
 def angle_to_rotation_matrix(h, d=3):
     """
     Create rotation matrices from an array of angles. If
     ``d > 2`` then rotation is performed in the first two dims.
-    
+
     Parameters
     ----------
     h : jax array of shape (N, T)
@@ -229,11 +229,11 @@ def angle_to_rotation_matrix(h, d=3):
     m: jax array of shape (..., d, d)
         Rotation matrices.
     """
-    m = jnp.tile(jnp.eye(d), (*h.shape,1,1))
-    m = m.at[...,0,0].set(jnp.cos(h))
-    m = m.at[...,1,1].set(jnp.cos(h))
-    m = m.at[...,0,1].set(-jnp.sin(h))
-    m = m.at[...,1,0].set(jnp.sin(h))
+    m = jnp.tile(jnp.eye(d), (*h.shape, 1, 1))
+    m = m.at[..., 0, 0].set(jnp.cos(h))
+    m = m.at[..., 1, 1].set(jnp.cos(h))
+    m = m.at[..., 0, 1].set(-jnp.sin(h))
+    m = m.at[..., 1, 0].set(jnp.sin(h))
     return m
 
 
@@ -241,7 +241,7 @@ def vector_to_angle(V):
     """
     Convert 2D vectors to angles in [-pi, pi]. The vector (1,0)
     corresponds to angle of 0. If V is multidimensional, the first
-    n-1 dimensions are treated as batch dims. 
+    n-1 dimensions are treated as batch dims.
 
     Parameters
     ----------
@@ -253,17 +253,27 @@ def vector_to_angle(V):
     h : jax array
         Rotation angles in radians.
     """
-    return jnp.arctan2(V[...,1], V[...,0])
+    return jnp.arctan2(V[..., 1], V[..., 0])
 
 
-def fit_pca(Y, mask, anterior_idxs=None, posterior_idxs=None, conf=None, 
-            conf_threshold=0.5, verbose=False, PCA_fitting_num_frames=1000000, 
-            exclude_outliers_for_pca=False, fix_heading=False, **kwargs):
+def fit_pca(
+    Y,
+    mask,
+    anterior_idxs=None,
+    posterior_idxs=None,
+    conf=None,
+    conf_threshold=0.5,
+    verbose=False,
+    PCA_fitting_num_frames=1000000,
+    exclude_outliers_for_pca=False,
+    fix_heading=False,
+    **kwargs,
+):
     """
     Fit a PCA model to transformed keypoint coordinates. If ``conf`` is
     not None, perform linear interpolation over outliers defined by
     ``conf < conf_threshold``.
-    
+
     Parameters
     ----------
     Y : jax array of shape (..., k, d)
@@ -287,7 +297,7 @@ def fit_pca(Y, mask, anterior_idxs=None, posterior_idxs=None, conf=None,
         If False, then the low-confidence keypoint coordinates are
         linearly interpolated.
     fix_heading : bool, default=False
-        Whether keep the heading angle fixed. If true, the 
+        Whether keep the heading angle fixed. If true, the
         heading ``h`` is set to 0 and keypoints are not rotated.
     **kwargs : dict
         Overflow, for convenience.
@@ -298,27 +308,43 @@ def fit_pca(Y, mask, anterior_idxs=None, posterior_idxs=None, conf=None,
         PCA object fit to observations.
     """
     Y_flat = preprocess_for_pca(
-        Y, anterior_idxs, posterior_idxs, conf, 
-        conf_threshold, fix_heading, verbose)[0]
-    
-    if (not exclude_outliers_for_pca) or (conf is None): pca_mask = mask
-    else: pca_mask = jnp.logical_and(mask, (conf > conf_threshold).all(-1))
-    
+        Y,
+        anterior_idxs,
+        posterior_idxs,
+        conf,
+        conf_threshold,
+        fix_heading,
+        verbose,
+    )[0]
+
+    if (not exclude_outliers_for_pca) or (conf is None):
+        pca_mask = mask
+    else:
+        pca_mask = jnp.logical_and(mask, (conf > conf_threshold).all(-1))
+
     assert pca_mask.sum() >= (Y.shape[-1] * Y.shape[-2]), (
         "Not enough frames for PCA fitting. Make sure "
-        "`exclude_outliers_for_pca=False` 'or decrease `conf_threshold`.")
-    
+        "`exclude_outliers_for_pca=False` 'or decrease `conf_threshold`."
+    )
+
     return utils.fit_pca(Y_flat, pca_mask, PCA_fitting_num_frames, verbose)
 
 
-def preprocess_for_pca(Y, anterior_idxs, posterior_idxs, conf=None, 
-                       conf_threshold=.5, fix_heading=False, 
-                       verbose=False, **kwargs):
+def preprocess_for_pca(
+    Y,
+    anterior_idxs,
+    posterior_idxs,
+    conf=None,
+    conf_threshold=0.5,
+    fix_heading=False,
+    verbose=False,
+    **kwargs,
+):
     """
-    Prepare keypoint coordinates for PCA by performing egocentric 
+    Prepare keypoint coordinates for PCA by performing egocentric
     alignment (optional), changing basis using ``center_embedding(k)``,
     and reshaping to a single flat vector per frame.
-    
+
     Parameters
     ----------
     Y : jax array of shape (..., k, d)
@@ -332,30 +358,30 @@ def preprocess_for_pca(Y, anterior_idxs, posterior_idxs, conf=None,
     conf_threshold : float, default=.5
         Confidence threshold for interpolation.
     fix_heading : bool, default=False
-        Whether keep the heading angle fixed. If true, the 
+        Whether keep the heading angle fixed. If true, the
         heading ``h`` is set to 0 and keypoints are not rotated.
     verbose : bool, default=False
         Whether to print progress updates.
     **kwargs : dict
         Overflow, for convenience.
-          
+
     Returns
     -------
     Y_flat : jax array of shape (..., (k - 1) * d), optional
         Aligned and embedded keypoint observations.
     """
     if conf is not None:
-        outliers = (conf < conf_threshold)
+        outliers = conf < conf_threshold
         if verbose:
             n = outliers.sum()
             pct = outliers.mean() * 100
-            print(f'Interpolating {n} ({pct:.1f}%) low-confidence keypoints')
+            print(f"Interpolating {n} ({pct:.1f}%) low-confidence keypoints")
         Y = interpolate(Y, outliers)
-    
+
     if fix_heading:
         v = Y.mean(-2).at[..., 2:].set(0)
         h = jnp.zeros(Y.shape[:-2])
-        Y_aligned = Y - v[...,na,:]
+        Y_aligned = Y - v[..., na, :]
     else:
         Y_aligned, v, h = align_egocentric(Y, anterior_idxs, posterior_idxs)
 
@@ -369,11 +395,11 @@ def preprocess_for_pca(Y, anterior_idxs, posterior_idxs, conf=None,
 
 def align_egocentric(Y, anterior_idxs, posterior_idxs, **kwargs):
     """
-    Perform egocentric alignment of keypoints by translating the 
+    Perform egocentric alignment of keypoints by translating the
     centroid to the origin and rotatating so that the vector pointing
-    from the posterior bodyparts toward the anterior bodyparts is 
+    from the posterior bodyparts toward the anterior bodyparts is
     proportional to (1,0).
-    
+
     Parameters
     ----------
     Y : jax array of shape (..., k, d)
@@ -384,7 +410,7 @@ def align_egocentric(Y, anterior_idxs, posterior_idxs, **kwargs):
         Posterior keypoint indices for heading initialization.
     **kwargs : dict
         Overflow, for convenience.
-        
+
     Returns
     -------
     Y_aligned : jax array of shape (..., k, d)
@@ -394,11 +420,11 @@ def align_egocentric(Y, anterior_idxs, posterior_idxs, **kwargs):
     h : jax array
         Heading angles that were used for alignment.
     """
-    posterior_loc = Y[..., posterior_idxs, :2].mean(-2) 
-    anterior_loc = Y[..., anterior_idxs, :2].mean(-2) 
+    posterior_loc = Y[..., posterior_idxs, :2].mean(-2)
+    anterior_loc = Y[..., anterior_idxs, :2].mean(-2)
     h = vector_to_angle(anterior_loc - posterior_loc)
     v = Y.mean(-2).at[..., 2:].set(0)
-    Y_aligned = inverse_rigid_transform(Y,v,h)
+    Y_aligned = inverse_rigid_transform(Y, v, h)
     return Y_aligned, v, h
 
 
@@ -406,7 +432,7 @@ def align_egocentric(Y, anterior_idxs, posterior_idxs, **kwargs):
 def interpolate(Y, outliers, axis=1):
     """
     Use linear interpolation to impute the coordinates of outliers.
-    
+
     Parameters
     ----------
     Y : jax array of shape (N, T, k, d)
@@ -415,27 +441,34 @@ def interpolate(Y, outliers, axis=1):
         Binary indicator whose true entries are outlier points.
     axis : int, default=1
         Axis to interpolate along.
-        
+
     Returns
     -------
     Y_interp : jax array, shape (..., T, k, d)
         Copy of ``Y`` where outliers have been replaced by
         linearly interpolated values.
-    """   
+    """
     Y = np.moveaxis(Y, axis, 0)
     init_shape = Y.shape
-    Y = Y.reshape(init_shape[0],-1)
+    Y = Y.reshape(init_shape[0], -1)
 
     outliers = np.moveaxis(outliers, axis, 0)
-    outliers = np.repeat(outliers[...,None],init_shape[-1],axis=-1)
-    outliers = outliers.reshape(init_shape[0],-1)
+    outliers = np.repeat(outliers[..., None], init_shape[-1], axis=-1)
+    outliers = outliers.reshape(init_shape[0], -1)
 
     interp = lambda x, xp, fp: (
-        np.ones_like(x)*x.mean() if len(xp)==0 else np.interp(x,xp,fp))
-    
-    Y = np.stack([interp(
-        np.arange(init_shape[0]), 
-        np.nonzero(~outliers[:,i])[0],
-        Y[:,i][~outliers[:,i]]
-    ) for i in range(Y.shape[1])], axis=1)     
-    return np.moveaxis(Y.reshape(init_shape),0,axis)
+        np.ones_like(x) * x.mean() if len(xp) == 0 else np.interp(x, xp, fp)
+    )
+
+    Y = np.stack(
+        [
+            interp(
+                np.arange(init_shape[0]),
+                np.nonzero(~outliers[:, i])[0],
+                Y[:, i][~outliers[:, i]],
+            )
+            for i in range(Y.shape[1])
+        ],
+        axis=1,
+    )
+    return np.moveaxis(Y.reshape(init_shape), 0, axis)

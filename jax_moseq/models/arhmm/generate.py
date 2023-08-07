@@ -3,9 +3,11 @@ import jax.numpy as jnp
 import jax.random as jr
 from jax.scipy.linalg import cho_factor
 import numpy as np
+
 na = jnp.newaxis
 
 from jax_moseq.utils import pad_affine
+
 
 def steady_state_distribution(pi, pseudocount=1e-3):
     """
@@ -22,15 +24,17 @@ def steady_state_distribution(pi, pseudocount=1e-3):
     -------
     steady_state : jax array of shape (num_states,)
         Steady state distribution.
-    """    
+    """
     # make sure the matrix is regular and eigendecompose
-    pi = np.array(pi) # non-symmetric eigendecomposition only works on CPU
-    pi_regular = (pi + pseudocount)/(pi + pseudocount).sum(1)[:,None]
+    pi = np.array(pi)  # non-symmetric eigendecomposition only works on CPU
+    pi_regular = (pi + pseudocount) / (pi + pseudocount).sum(1)[:, None]
     eigenvals, eigenvects = np.linalg.eig(pi_regular.T)
 
     # extract the eigenvector corresponding to the eigenvalue with unit magnitude
     index = np.argmin(np.abs(jnp.abs(eigenvals) - 1))
-    steady_state = np.real(eigenvects[:, index]) / np.sum(np.real(eigenvects[:, index]))
+    steady_state = np.real(eigenvects[:, index]) / np.sum(
+        np.real(eigenvects[:, index])
+    )
     return jnp.array(steady_state)
 
 
@@ -68,7 +72,7 @@ def generate_initial_state(seed, pi, Ab, Q):
 
     # sample initial latent trajectory
     latent_dim = Ab.shape[1]
-    nlags = (Ab.shape[2]-1) // latent_dim
+    nlags = (Ab.shape[2] - 1) // latent_dim
     xlags = jr.normal(seed, (nlags, latent_dim))
 
     # update the seed
@@ -115,10 +119,11 @@ def generate_next_state(seed, z, xlags, Ab, Q, pi):
     seed = jr.split(seed)[1]
     return z, xlags, seed
 
+
 def generate_next_state_fast(seed, z, xlags, Ab, L, pi, sigma):
     """
     Generate the next states of an ARHMM, using cholesky
-    factors and precomputed gaussian random variables to 
+    factors and precomputed gaussian random variables to
     speed up sampling.
 
     Parameters
@@ -159,7 +164,6 @@ def generate_next_state_fast(seed, z, xlags, Ab, L, pi, sigma):
     return z, xlags, seed
 
 
-
 def generate_states(seed, pi, Ab, Q, n_steps, init_state=None):
     """
     Generate a sequence of states from an ARHMM.
@@ -189,19 +193,22 @@ def generate_states(seed, pi, Ab, Q, n_steps, init_state=None):
     # initialize the states
     if init_state is None:
         z, xlags, seed = generate_initial_state(seed, pi, Ab, Q)
-    else: 
+    else:
         z, xlags = init_state
-        
+
     # precompute cholesky factors and random samples
     L = cho_factor(Q, lower=True)[0]
     sigmas = jr.normal(seed, (n_steps, Q.shape[-1]))
-    
+
     # generate the states using jax.lax.scan
     def _generate_next_state(carry, sigma):
         z, xlags, seed = carry
-        z, xlags, seed = generate_next_state_fast(seed, z, xlags, Ab, L, pi, sigma)
+        z, xlags, seed = generate_next_state_fast(
+            seed, z, xlags, Ab, L, pi, sigma
+        )
         return (z, xlags, seed), (z, xlags)
+
     carry = (z, xlags, seed)
     _, (zs, xs) = jax.lax.scan(_generate_next_state, carry, sigmas)
 
-    return zs, xs[:,-1]
+    return zs, xs[:, -1]

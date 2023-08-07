@@ -27,16 +27,16 @@ def ar_log_likelihood(x, params):
 def get_lags(x, nlags):
     """
     Get lags of a multivariate time series. Lags are concatenated along
-    the last dim in time-order. 
+    the last dim in time-order.
 
     Parameters
-    ----------  
+    ----------
     nlags: int
         Number of lags
-        
+
     x: jax array, shape (..., t, d)
-        Batch of d-dimensional time series 
-    
+        Batch of d-dimensional time series
+
     Returns
     -------
     x_lagged: jax array, shape (..., t-nlags, d*nlags)
