@@ -337,3 +337,50 @@ def init_hdp_transitions(seed, num_states, alpha, kappa, gamma, **kwargs):
     # pseudocount for numerical stability
     pi = (pi+eps)/(pi+eps).sum(1)[:,None]
     return betas, pi
+
+
+def init_hdp_transitions_twarhmm(seed, num_discrete_states, num_taus, alpha, kappa, gamma, tau_stay, **kwargs):
+    """
+    Initialize the transition parameters of the HDP-HMM. For use in WARHMM code.
+
+    Parameters
+    ----------
+    seed : jr.PRNGKey
+        JAX random seed.
+    num_states : int
+        Max number of HMM states.
+    betas : jax array of shape (num_states,)
+        State usages.
+    alpha : scalar
+        State usage influence hyperparameter.
+    kappa : scalar
+        State persistence (i.e. "stickiness") hyperparameter.
+    gamma : scalar
+        Usage uniformity hyperparameter.
+    tau_stay : scalar
+        Stay probability for continuous latent.
+    kwargs : dict
+        Overflow, for convenience.
+
+    Returns
+    -------
+    betas : jax array of shape (num_states,)
+        Initial state usages.
+    pi : jax_array of shape (num_states, num_states)
+        Initial transition probabilities.
+    """
+    seeds = jr.split(seed)
+    betas_init = jr.dirichlet(seeds[0], jnp.full(num_discrete_states, gamma / num_discrete_states))
+    pseudo_counts = jnp.zeros((num_discrete_states, num_discrete_states))
+    betas_z, pi_z = sample_hdp_transitions(seeds[1], pseudo_counts, betas_init,
+                                       alpha, kappa, gamma)
+
+    # pseudocount for numerical stability
+    pi_z = (pi_z + eps) / (pi_z + eps).sum(1)[:, None]
+
+    betas_t = jnp.ones(num_taus) / (num_taus)
+
+    pi_t = tau_stay * np.eye(num_taus) + (1-tau_stay)/2 * (np.diag(np.ones(num_taus-1), 1) + np.diag(np.ones(num_taus-1), -1))
+    pi_t /= pi_t.sum(axis=1, keepdims=True)
+
+    return betas_z, pi_z, betas_t, pi_t
