@@ -85,62 +85,38 @@ def kalman_sample(
         Sampled continuous state sequence.
     """
 
-    ar_dim, obs_dim = A.shape[-1], Rs.shape[-1]
-
-    # =======================================
-    # 1. Format initial parameters, for x[0]
-    # =======================================
+    n_states, _, ar_dim, obs_dim = *A.shape, Rs.shape[-1]
     initial_params = ParamsLGSSMInitial(mean=m0, cov=S0)
 
-    # ==============================
-    # 2. Format dynamics parameters
-    # ==============================
-    # Given discrete state sequence `zs``, roll-out dynamics so that all params
-    # have leading shape (T-L, ...). Apply mask for timesteps [L, -1).
+    A_and_mask = jnp.concatenate((A, masked_dynamics_params["weights"][na]))
+    B_and_mask = jnp.concatenate((B, masked_dynamics_params["bias"][na]))
+    Q_and_mask = jnp.concatenate((Q, masked_dynamics_params["cov"][na]))
+    zs_masked = jnp.where(mask[:-1], zs, n_states).astype(int)
+
     dynamics_params = ParamsLGSSMDynamics(
-        weights=jnp.where(
-            mask[:-1, None, None], A[zs], masked_dynamics_params["weights"]
-        ),
-        bias=jnp.where(mask[:-1, None], B[zs], masked_dynamics_params["bias"]),
+        weights=lambda t: A_and_mask[zs_masked[t]],
+        bias=lambda t: B_and_mask[zs_masked[t]],
+        cov=lambda t: Q_and_mask[zs_masked[t]],
         input_weights=jnp.zeros((ar_dim, 0)),
-        cov=jnp.where(
-            mask[:-1, None, None], Q[zs], masked_dynamics_params["cov"]
-        ),
     )
 
-    # ===============================
-    # 3. Format emissions parameters
-    # ===============================
-    # Apply mask to observations, shape (T-L+1, obs_dim, obs_dim)
-    Rs_masked = jnp.where(mask[:, None], Rs, masked_obs_noise)
-
-    # Inflate Rs_masked from diagonal covariance (..., obs_dim) to full covariance
     emissions_params = ParamsLGSSMEmissions(
         weights=C,
         bias=D,
         input_weights=jnp.zeros((obs_dim, 0)),
-        cov=jax.vmap(jnp.diag)(Rs_masked),
+        cov=jnp.where(mask[:, None], Rs, masked_obs_noise),
     )
 
-    # ===============================
-    # 4. Put it all together
-    # ===============================
     params = ParamsLGSSM(
         initial=initial_params,
         dynamics=dynamics_params,
         emissions=emissions_params,
     )
 
-    def _parallel_kalman(seed, params, ys, jitter):
-        # no jitter since error doesn't accumulate sequentially
+    if parallel:
         return parallel_lgssm_sample(seed, params, ys)
-
-    def _serial_kalman(seed, params, ys, jitter):
+    else:
         return serial_lgssm_sample(seed, params, ys, jitter=jitter)
-
-    return lax.cond(
-        parallel, _parallel_kalman, _serial_kalman, seed, params, ys, jitter
-    )
 
 
 def ar_to_lds(Ab, Q, Cd=None):
