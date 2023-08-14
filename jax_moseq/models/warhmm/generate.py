@@ -7,6 +7,8 @@ na = jnp.newaxis
 
 from jax_moseq.utils import pad_affine
 
+
+#TODO: NEED TO UPDATE FOR TWARHMM
 def steady_state_distribution(pi, pseudocount=1e-3):
     """
     Compute the steady state distribution of a Markov chain.

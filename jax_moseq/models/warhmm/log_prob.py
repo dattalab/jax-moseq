@@ -3,7 +3,7 @@ import jax.numpy as jnp
 
 from jax_moseq.utils.autoregression import get_nlags, ar_log_likelihood
 
-
+#TODO: NEED TO UPDATE FOR TWARHMM
 def discrete_stateseq_log_prob(z, pi, **kwargs):
     """
     Calculate the log probability of a discrete state sequence
