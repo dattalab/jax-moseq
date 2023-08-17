@@ -141,11 +141,14 @@ def M_step(x, mask, z, t, num_states, possible_taus, covariance_reg=1e-4, nlags=
         # calc sufficient stats to fit observation parameters
         #TODO: better way to compute this?
         inds_each_k = jnp.zeros(K, z.shape[0])
-        for k in range(K):
-            inds_each_k[k] = z == k
+        # for k in range(K):
+        #     inds_each_k[k] = z == k
 
-        def _compute_continuous_suff_stats(inds, dxn_dxn, dxn_xn, xn_xn):
+        def _compute_continuous_suff_stats(k, z, dxn_dxn, dxn_xn, xn_xn):
+            # try computing inds this way (might get upset with dynamic slicing), or jnp.where
+            inds = z == k
             tau_given_k = t[inds]
+            
             tauinv_given_k = 1 / tau_given_k
 
             # sufficient stats for A
@@ -161,8 +164,8 @@ def M_step(x, mask, z, t, num_states, possible_taus, covariance_reg=1e-4, nlags=
 
         # K leading dim
         dxxT, xxT_tauinv, dxdxT_tau, T = jax.vmap(
-            _compute_continuous_suff_stats, in_axes=(0, None, None, None))\
-            (inds_each_k, dxn_dxn, dxn_xn, xn_xn)
+            _compute_continuous_suff_stats, in_axes=(0, None, None, None, None))\
+            (jnp.arange(K), z, dxn_dxn, dxn_xn, xn_xn)
 
         #TODO: worry about fitting transitions at some point?
 
