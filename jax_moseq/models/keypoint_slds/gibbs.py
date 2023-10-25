@@ -1,9 +1,10 @@
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+from functools import partial
 
 from jax_moseq.utils.kalman import kalman_sample
-from jax_moseq.utils.distributions import sample_vonmises_fisher, sample_scaled_inv_chi2
+from jax_moseq.utils.distributions import sample_vonmises_fisher
 
 from jax_moseq.models import arhmm, slds
 from jax_moseq.models.keypoint_slds.alignment import (
@@ -11,15 +12,29 @@ from jax_moseq.models.keypoint_slds.alignment import (
     estimate_coordinates,
     estimate_aligned,
     apply_rotation,
-    vector_to_angle
+    vector_to_angle,
 )
 
 na = jnp.newaxis
 
 
-@jax.jit
-def resample_continuous_stateseqs(seed, Y, mask, v, h, s, z,
-                                  Cd, sigmasq, Ab, Q, **kwargs):
+@partial(jax.jit, static_argnames=("parallel_message_passing",))
+def resample_continuous_stateseqs(
+    seed,
+    Y,
+    mask,
+    v,
+    h,
+    s,
+    z,
+    Cd,
+    sigmasq,
+    Ab,
+    Q,
+    jitter=1e-3,
+    parallel_message_passing=True,
+    **kwargs
+):
     """
     Resamples the latent trajectories ``x``.
 
@@ -47,6 +62,12 @@ def resample_continuous_stateseqs(seed, Y, mask, v, h, s, z,
         Autoregressive transforms.
     Q : jax array of shape (num_states, latent_dim, latent_dim)
         Autoregressive noise covariances.
+    jitter : float, default=1e-3
+        Amount to boost the diagonal of the covariance matrix
+        during backward-sampling of the continuous states.
+    parallel_message_passing : bool, default=True,
+        Use associative scan for Kalman sampling, which is faster on
+        a GPU but has a significantly longer jit time.
     **kwargs : dict
         Overflow, for convenience.
 
@@ -56,14 +77,26 @@ def resample_continuous_stateseqs(seed, Y, mask, v, h, s, z,
         Latent trajectories.
     """
     Y, s, Cd, sigmasq = to_vanilla_slds(Y, v, h, s, Cd, sigmasq)
-    x = slds.resample_continuous_stateseqs(seed, Y, mask, z, s,
-                                           Ab, Q, Cd, sigmasq)
+    x = slds.resample_continuous_stateseqs(
+        seed,
+        Y,
+        mask,
+        z,
+        s,
+        Ab,
+        Q,
+        Cd,
+        sigmasq,
+        jitter=jitter,
+        parallel_message_passing=parallel_message_passing,
+    )
     return x
 
 
 @jax.jit
-def resample_obs_variance(seed, Y, mask, Cd, x, v, h, s,
-                          nu_sigma, sigmasq_0, **kwargs):
+def resample_obs_variance(
+    seed, Y, mask, Cd, x, v, h, s, nu_sigma, sigmasq_0, **kwargs
+):
     """
     Resample the observation variance ``sigmasq``.
 
@@ -98,13 +131,13 @@ def resample_obs_variance(seed, Y, mask, Cd, x, v, h, s,
         Unscaled noise.
     """
     sqerr = compute_squared_error(Y, x, v, h, Cd, mask)
-    return slds.resample_obs_variance_from_sqerr(seed, sqerr, mask, s,
-                                                 nu_sigma, sigmasq_0)
+    return slds.resample_obs_variance_from_sqerr(
+        seed, sqerr, mask, s, nu_sigma, sigmasq_0
+    )
 
 
 @jax.jit
-def resample_scales(seed, Y, x, v, h, Cd,
-                    sigmasq, nu_s, s_0, **kwargs):
+def resample_scales(seed, Y, x, v, h, Cd, sigmasq, nu_s, s_0, **kwargs):
     """
     Resample the scale values ``s``.
 
@@ -137,8 +170,7 @@ def resample_scales(seed, Y, x, v, h, Cd,
         Noise scales.
     """
     sqerr = compute_squared_error(Y, x, v, h, Cd)
-    return slds.resample_scales_from_sqerr(seed, sqerr,
-                                           sigmasq, nu_s, s_0)
+    return slds.resample_scales_from_sqerr(seed, sqerr, sigmasq, nu_s, s_0)
 
 
 @jax.jit
@@ -168,8 +200,8 @@ def compute_squared_error(Y, x, v, h, Cd, mask=None):
         Squared error between model predicted and
         true observations.
     """
-    Y_bar = estimate_coordinates(x, v, h, Cd)
-    sqerr = ((Y - Y_bar) ** 2).sum(-1)
+    Y_est = estimate_coordinates(x, v, h, Cd)
+    sqerr = ((Y - Y_est) ** 2).sum(-1)
     if mask is not None:
         sqerr = mask[..., na] * sqerr
     return sqerr
@@ -211,11 +243,13 @@ def resample_heading(seed, Y, x, v, s, Cd, sigmasq, **kwargs):
     variance = s * sigmasq
 
     # [(..., t, k, d, na) * (..., t, k, na, d) / (..., t, k, na, na)] -> (..., t, d, d)
-    S = (Y_bar[..., :2, na] * Y_cent[..., na, :2] / variance[..., na, na]).sum(-3)
-    del Y_bar, Y_cent, variance    # free up memory
+    S = (Y_bar[..., :2, na] * Y_cent[..., na, :2] / variance[..., na, na]).sum(
+        -3
+    )
+    del Y_bar, Y_cent, variance  # free up memory
 
-    kappa_cos = S[...,0,0] + S[...,1,1]
-    kappa_sin = S[...,0,1] - S[...,1,0]
+    kappa_cos = S[..., 0, 0] + S[..., 1, 1]
+    kappa_sin = S[..., 0, 1] - S[..., 1, 0]
     del S
 
     mean_direction = jnp.stack([kappa_cos, kappa_sin], axis=-1)
@@ -224,9 +258,20 @@ def resample_heading(seed, Y, x, v, s, Cd, sigmasq, **kwargs):
     return h
 
 
-@jax.jit 
-def resample_location(seed, Y, mask, x, h, s, Cd,
-                      sigmasq, sigmasq_loc, **kwargs):
+@jax.jit
+def resample_location(
+    seed,
+    Y,
+    mask,
+    x,
+    h,
+    s,
+    Cd,
+    sigmasq,
+    sigmasq_loc,
+    parallel_message_passing=True,
+    **kwargs
+):
     """
     Resample the centroid positions ``v``.
 
@@ -250,6 +295,9 @@ def resample_location(seed, Y, mask, x, h, s, Cd,
         Unscaled noise.
     sigmasq_loc : float
         Assumed variance in centroid displacements.
+    parallel_message_passing : bool, default=True,
+        Use associative scan for Kalman sampling, which is faster on
+        a GPU but has a significantly longer jit time.
     **kwargs : dict
         Overflow, for convenience.
 
@@ -265,33 +313,71 @@ def resample_location(seed, Y, mask, x, h, s, Cd,
     variance = s * sigmasq
     gammasq = 1 / (1 / variance).sum(-1, keepdims=True)
 
-    mu = jnp.einsum('...tkd, ...tk->...td',
-                    Y - Y_rot, gammasq / variance)
+    mu = jnp.einsum("...tkd, ...tk->...td", Y - Y_rot, gammasq / variance)
 
     # Apply Kalman filter to get smooth headings
+    # TODO Parameterize these distributional hyperparameter
     seed = jr.split(seed, mask.shape[0])
     m0 = jnp.zeros(d)
-    S0 = jnp.eye(d) * 1e6
+    S0 = jnp.eye(d) * 1e4
     A = jnp.eye(d)[na]
     B = jnp.zeros(d)[na]
     Q = jnp.eye(d)[na] * sigmasq_loc
     C = jnp.eye(d)
     D = jnp.zeros(d)
     R = jnp.repeat(gammasq, d, axis=-1)
-    zz = jnp.zeros_like(mask[:,1:], dtype=int)
+    zz = jnp.zeros_like(mask[:, 1:], dtype=int)
 
-    in_axes = (0,0,0,0,na,na,na,na,na,na,na,0)
-    v = jax.vmap(kalman_sample, in_axes)(
-        seed, mu, mask[:,:-1], zz, m0,
-        S0, A, B, Q, C, D, R)
+    masked_dynamics_noise = sigmasq_loc * 10
+    masked_obs_noise = sigmasq.max() * 10
+
+    masked_dynamics_params = {
+        "weights": jnp.eye(d),
+        "bias": jnp.zeros(d),
+        "cov": jnp.eye(d) * masked_dynamics_noise,
+    }
+
+    masked_obs_noise_diag = jnp.ones(d) * masked_obs_noise
+
+    in_axes = (0, 0, 0, 0, na, na, na, na, na, na, na, 0, na, na)
+    v = jax.vmap(
+        partial(kalman_sample, parallel=parallel_message_passing), in_axes
+    )(
+        seed,
+        mu,
+        mask,
+        zz,
+        m0,
+        S0,
+        A,
+        B,
+        Q,
+        C,
+        D,
+        R,
+        masked_dynamics_params,
+        masked_obs_noise_diag,
+    )
     return v
 
 
-
-def resample_model(data, seed, states, params, hypparams,
-                   noise_prior, ar_only=False, states_only=False,
-                   skip_noise=False, fix_heading=False, verbose=False,
-                   **kwargs):
+def resample_model(
+    data,
+    seed,
+    states,
+    params,
+    hypparams,
+    noise_prior,
+    ar_only=False,
+    states_only=False,
+    resample_global_noise_scale=False,
+    resample_local_noise_scale=True,
+    fix_heading=False,
+    verbose=False,
+    jitter=1e-3,
+    parallel_message_passing=False,
+    **kwargs
+):
     """
     Resamples the Keypoint SLDS model given the hyperparameters,
     data, noise prior, current states, and current parameters.
@@ -314,12 +400,20 @@ def resample_model(data, seed, states, params, hypparams,
         Whether to restrict sampling to ARHMM components.
     states_only : bool, default=False
         Whether to restrict sampling to states.
-    skip_noise : bool, default=False
-        Whether to exclude ``sigmasq`` and ``s`` from resampling.
+    resample_global_noise_scale : bool, default=False
+        Whether to resample the global noise scales (``sigmasq``)
+    resample_local_noise_scale : bool, default=True
+        Whether to resample the local noise scales (``s``)
     fix_heading : bool, default=False
         Whether to exclude ``h`` from resampling.
+    jitter : float, default=1e-3
+        Amount to boost the diagonal of the covariance matrix
+        during backward-sampling of the continuous states.
     verbose : bool, default=False
         Whether to print progress info during resampling.
+    parallel_message_passing : bool, default=True,
+        Use associative scan for Kalman sampling, which is faster on
+        a GPU but has a significantly longer jit time.
 
     Returns
     ------
@@ -327,44 +421,67 @@ def resample_model(data, seed, states, params, hypparams,
         Dictionary containing the hyperparameters and
         updated seed, states, and parameters of the model.
     """
-    model = arhmm.resample_model(data, seed, states, params,
-                                 hypparams, states_only, verbose=verbose)
+    model = arhmm.resample_model(
+        data, seed, states, params, hypparams, states_only, verbose=verbose
+    )
     if ar_only:
-        model['noise_prior'] = noise_prior
+        model["noise_prior"] = noise_prior
         return model
-    
-    seed = model['seed']
-    params = model['params'].copy()
-    states = model['states'].copy()
 
-    if not (states_only or skip_noise):
-        if verbose: print('Resampling sigmasq (global noise scales)')
-        params['sigmasq'] = resample_obs_variance(
-            seed, **data, **states, **params, 
-            s_0=noise_prior, **hypparams['obs_hypparams'])
+    seed = model["seed"]
+    params = model["params"].copy()
+    states = model["states"].copy()
 
-    if verbose: print('Resampling x (continuous latent states)')
-    states['x'] = resample_continuous_stateseqs(
-        seed, **data, **states, **params)
+    if (not states_only) and resample_global_noise_scale:
+        if verbose:
+            print("Resampling sigmasq (global noise scales)")
+        params["sigmasq"] = resample_obs_variance(
+            seed,
+            **data,
+            **states,
+            **params,
+            s_0=noise_prior,
+            **hypparams["obs_hypparams"]
+        )
+
+    if verbose:
+        print("Resampling x (continuous latent states)")
+    states["x"] = resample_continuous_stateseqs(
+        seed,
+        **data,
+        **states,
+        **params,
+        jitter=jitter,
+        parallel_message_passing=parallel_message_passing
+    )
 
     if not fix_heading:
-        if verbose: print('Resampling h (heading)')
-        states['h'] = resample_heading(
-            seed, **data, **states, **params)
+        if verbose:
+            print("Resampling h (heading)")
+        states["h"] = resample_heading(seed, **data, **states, **params)
 
-    if verbose: print('Resampling v (location)')
-    states['v'] = resample_location(
-        seed, **data, **states, **params, 
-        **hypparams['cen_hypparams'])
+    if verbose:
+        print("Resampling v (location)")
+    states["v"] = resample_location(
+        seed, **data, **states, **params, **hypparams["cen_hypparams"]
+    )
 
-    if not skip_noise:
-        if verbose: print('Resampling s (local noise scales)')
-        states['s'] = resample_scales(
-            seed, **data, **states, **params, 
-            s_0=noise_prior, **hypparams['obs_hypparams'])
+    if resample_local_noise_scale:
+        if verbose:
+            print("Resampling s (local noise scales)")
+        states["s"] = resample_scales(
+            seed,
+            **data,
+            **states,
+            **params,
+            s_0=noise_prior,
+            **hypparams["obs_hypparams"]
+        )
 
-    return {'seed': seed,
-            'states': states, 
-            'params': params, 
-            'hypparams': hypparams,
-            'noise_prior': noise_prior}
+    return {
+        "seed": seed,
+        "states": states,
+        "params": params,
+        "hypparams": hypparams,
+        "noise_prior": noise_prior,
+    }

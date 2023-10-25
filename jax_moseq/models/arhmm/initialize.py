@@ -15,7 +15,7 @@ def init_ar_params(seed, *, num_states, nu_0, S_0, M_0, K_0, **kwargs):
     """
     Initialize the autoregression parameters by sampling from an
     MNIW distribution. Note below that ar_dim = latent_dim * num_lags + 1.
-    
+
     Parameters
     ----------
     seed : jr.PRNGKey
@@ -42,8 +42,7 @@ def init_ar_params(seed, *, num_states, nu_0, S_0, M_0, K_0, **kwargs):
     """
     seeds = jr.split(seed, num_states)
     in_axes = (0, na, na, na, na)
-    Ab, Q = jax.vmap(sample_mniw, in_axes)(
-        seeds, nu_0, S_0, M_0, K_0)
+    Ab, Q = jax.vmap(sample_mniw, in_axes)(seeds, nu_0, S_0, M_0, K_0)
     return Ab, Q
 
 
@@ -51,7 +50,7 @@ def init_states(seed, x, mask, params, robust=False, **kwargs):
     """
     Initialize the latent states of the ARHMM from the
     data and parameters.
-    
+
     Parameters
     ----------
     seed : jr.PRNGKey
@@ -61,7 +60,7 @@ def init_states(seed, x, mask, params, robust=False, **kwargs):
     mask : jax array of shape (N, T)
         Binary indicator for valid frames.
     params : dict
-        Values for each model parameter. 
+        Values for each model parameter.
     **kwargs : dict
         Overflow, for convenience.
 
@@ -71,14 +70,14 @@ def init_states(seed, x, mask, params, robust=False, **kwargs):
         State values for each latent variable.
     """
     z = resample_discrete_stateseqs(seed, x, mask, robust=robust, **params)
-    return {'z': z, 'tau': jnp.ones(z.shape)}
+    return {"z": z, "tau": jnp.ones(z.shape)}
 
 
 def init_nu(num_states, **kwargs):
     """
     Initialize the degrees of freedom parameter of the
     autoregression noise using a multivariate-t distribution.
-    
+
     Parameters
     ----------
     num_states : int
@@ -98,7 +97,7 @@ def init_params(seed, trans_hypparams, ar_hypparams, robust=False, **kwargs):
     """
     Initialize the parameters of the ARHMM from the
     data and hyperparameters.
-    
+
     Parameters
     ----------
     seed : jr.PRNGKey
@@ -109,24 +108,26 @@ def init_params(seed, trans_hypparams, ar_hypparams, robust=False, **kwargs):
         Autoregression hyperparameters.
     **kwargs : dict
         Overflow, for convenience.
-        
+
     Returns
     -------
     params : dict
         Values for each model parameter.
     """
     params = {}
-    params['betas'], params['pi'] = init_hdp_transitions(seed, **trans_hypparams)
-    params['Ab'], params['Q'] = init_ar_params(seed, **ar_hypparams)
+    params["betas"], params["pi"] = init_hdp_transitions(
+        seed, **trans_hypparams
+    )
+    params["Ab"], params["Q"] = init_ar_params(seed, **ar_hypparams)
     if robust:
-        params['nu'] = init_nu(**ar_hypparams)
+        params["nu"] = init_nu(**ar_hypparams)
     return params
 
 
 def init_hyperparams(trans_hypparams, ar_hypparams, robust=False, **kwargs):
     """
     Formats the hyperparameter dictionary of the ARHMM.
-    
+
     Parameters
     ----------
     trans_hypparams : dict
@@ -135,7 +136,7 @@ def init_hyperparams(trans_hypparams, ar_hypparams, robust=False, **kwargs):
         Autoregression hyperparameters.
     **kwargs : dict, optional
         Overflow, for convenience.
-        
+
     Returns
     -------
     hypparams : dict
@@ -143,39 +144,38 @@ def init_hyperparams(trans_hypparams, ar_hypparams, robust=False, **kwargs):
     """
     trans_hypparams = trans_hypparams.copy()
     ar_hypparams = ar_hypparams.copy()
-    
+
     # unpack for brevity
-    d = ar_hypparams['latent_dim']
-    nlags = ar_hypparams['nlags']
-    S_0_scale = ar_hypparams['S_0_scale']
-    K_0_scale = ar_hypparams['K_0_scale']
+    d = ar_hypparams["latent_dim"]
+    nlags = ar_hypparams["nlags"]
+    S_0_scale = ar_hypparams["S_0_scale"]
+    K_0_scale = ar_hypparams["K_0_scale"]
 
-    ar_hypparams['S_0'] = S_0_scale * jnp.eye(d)
-    ar_hypparams['K_0'] = K_0_scale * jnp.eye(d * nlags + 1)
-    ar_hypparams['M_0'] = jnp.pad(jnp.eye(d), ((0,0),((nlags-1)*d,1)))
-    ar_hypparams['num_states'] = trans_hypparams['num_states']
-    ar_hypparams['nu_0'] = d + 2
-    ar_hypparams['robust'] = robust
-    
-    return {'trans_hypparams': trans_hypparams,
-            'ar_hypparams': ar_hypparams}
+    ar_hypparams["S_0"] = S_0_scale * jnp.eye(d)
+    ar_hypparams["K_0"] = K_0_scale * jnp.eye(d * nlags + 1)
+    ar_hypparams["M_0"] = jnp.pad(jnp.eye(d), ((0, 0), ((nlags - 1) * d, 1)))
+    ar_hypparams["num_states"] = trans_hypparams["num_states"]
+    ar_hypparams["nu_0"] = d + 2
+    ar_hypparams["robust"] = robust
+
+    return {"trans_hypparams": trans_hypparams, "ar_hypparams": ar_hypparams}
 
 
-def init_model(data=None,
-               states=None,
-               params=None,
-               hypparams=None,
-               seed=jr.PRNGKey(0),
-               
-               trans_hypparams=None,
-               ar_hypparams=None,
-               robust=False,
-               
-               verbose=False,
-               **kwargs):
+def init_model(
+    data=None,
+    states=None,
+    params=None,
+    hypparams=None,
+    seed=jr.PRNGKey(0),
+    trans_hypparams=None,
+    ar_hypparams=None,
+    robust=False,
+    verbose=False,
+    **kwargs
+):
     """
     Initialize an ARHMM model dict containing the hyperparameters
-    and initial seed, states, and parameters. 
+    and initial seed, states, and parameters.
 
     Parameters
     ----------
@@ -207,58 +207,63 @@ def init_model(data=None,
     model : dict
         Dictionary containing the hyperparameters and
         initial seed, states, and parameters of the model.
-        
+
     Raises
     ------
     ValueError
         If the subset of the parameters provided by the caller
         is insufficient for model initialization.
     """
-    _check_init_args(data, states, params, hypparams,
-                     trans_hypparams, ar_hypparams)
-    
+    _check_init_args(
+        data, states, params, hypparams, trans_hypparams, ar_hypparams
+    )
+
     model = {}
 
     if states is None:
-        x, mask = data['x'], data['mask']
-        
+        x, mask = data["x"], data["mask"]
+
     if isinstance(seed, int):
         seed = jr.PRNGKey(seed)
-    model['seed'] = seed
+    model["seed"] = seed
 
     if hypparams is None:
         if verbose:
-            print('ARHMM: Initializing hyperparameters')
-        hypparams = init_hyperparams(trans_hypparams, ar_hypparams, robust=robust)
+            print("ARHMM: Initializing hyperparameters")
+        hypparams = init_hyperparams(
+            trans_hypparams, ar_hypparams, robust=robust
+        )
     else:
         hypparams = device_put_as_scalar(hypparams)
-    model['hypparams'] = hypparams
-    
+    model["hypparams"] = hypparams
+
     if params is None:
         if verbose:
-            print('ARHMM: Initializing parameters')
+            print("ARHMM: Initializing parameters")
         params = init_params(seed, robust=robust, **hypparams)
     else:
         params = jax.device_put(params)
-    model['params'] = params
+    model["params"] = params
 
     if states is None:
         if verbose:
-            print('ARHMM: Initializing states')
+            print("ARHMM: Initializing states")
         states = init_states(seed, x, mask, params, robust=robust)
     else:
         states = jax.device_put(states)
-    model['states'] = states
+    model["states"] = states
 
     return model
 
+
 @check_precision
-def _check_init_args(data, states, params, hypparams,
-                     trans_hypparams, ar_hypparams):
+def _check_init_args(
+    data, states, params, hypparams, trans_hypparams, ar_hypparams
+):
     """
     Helper method for ``init_model`` that ensures a sufficient subset
     of the initialization arguments have been provided by the caller.
-    
+
     Parameters
     ----------
     data : dict or None
@@ -274,7 +279,7 @@ def _check_init_args(data, states, params, hypparams,
         HDP transition hyperparameters.
     ar_hypparams : dict or None
         Autoregression hyperparameters.
-        
+
     Raises
     ------
     ValueError
@@ -282,8 +287,10 @@ def _check_init_args(data, states, params, hypparams,
         is insufficient for model initialization.
     """
     if not (data or states):
-        raise ValueError('Must provide either `data` or `states`.')
-        
+        raise ValueError("Must provide either `data` or `states`.")
+
     if not (hypparams or (trans_hypparams and ar_hypparams)):
-        raise ValueError('Must provide either `hypparams` or '
-                         'both `trans_hypparams` and `ar_hypparams`.')
+        raise ValueError(
+            "Must provide either `hypparams` or "
+            "both `trans_hypparams` and `ar_hypparams`."
+        )
