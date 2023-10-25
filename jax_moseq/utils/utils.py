@@ -1,7 +1,6 @@
 import numpy as np
 import jax
 import jax.numpy as jnp
-from jax.tree_util import tree_map
 from sklearn.decomposition import PCA
 from jax.scipy.linalg import cho_factor, cho_solve
 import inspect
@@ -93,7 +92,7 @@ def jax_io(fn):
 
 def device_put_as_scalar(x):
     as_scalar = lambda arr: arr.item() if arr.shape==() else arr
-    return tree_map(as_scalar, jax.device_put(x))
+    return jax.tree_map(as_scalar, jax.device_put(x))
 
 
 def apply_affine(x, Ab):

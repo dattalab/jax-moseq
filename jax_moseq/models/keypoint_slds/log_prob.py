@@ -27,8 +27,8 @@ def location_log_prob(v, sigmasq_loc):
     """
     v0 = v[..., :-1, :]
     v1 = v[..., 1:, :]
-    sigma = jnp.sqrt(sigmasq_loc)
-    return tfd.MultivariateNormalDiag(v0, None, sigma).log_prob(v1)
+    sigma = jnp.sqrt(sigmasq_loc) * jnp.ones_like(v0)
+    return tfd.MultivariateNormalDiag(v0, sigma).log_prob(v1)
 
 
 def obs_log_prob(Y, x, v, h, s, Cd, sigmasq, **kwargs):
@@ -62,8 +62,8 @@ def obs_log_prob(Y, x, v, h, s, Cd, sigmasq, **kwargs):
         Log probability of `Y`.
     """
     Y_bar = estimate_coordinates(x, v, h, Cd)
-    sigma = jnp.sqrt(s * sigmasq)
-    return tfd.MultivariateNormalDiag(Y_bar, None, sigma).log_prob(Y)
+    sigma = jnp.broadcast_to(jnp.sqrt(s * sigmasq)[...,na], Y.shape)
+    return tfd.MultivariateNormalDiag(Y_bar, sigma).log_prob(Y)
 
 
 @jax.jit
