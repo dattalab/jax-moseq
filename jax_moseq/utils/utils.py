@@ -276,9 +276,10 @@ def unbatch(data, keys, bounds):
 
 def batch(data_dict, keys=None, seg_length=None, seg_overlap=30):
     """
-    Stack time-series data of different lengths into a single array for
-    batch processing, optionally breaking up the data into fixed length
-    segments. Data is 0-padded so that the stacked array isn't ragged.
+    Stack time-series data of different lengths into a single array for batch
+    processing, optionally breaking up the data into fixed length segments. The
+    data is padded so that the stacked array isn't ragged. The padding
+    repeats the last frame of each time-series until the end of the segment.
 
     Parameters
     ----------
@@ -328,7 +329,7 @@ def batch(data_dict, keys=None, seg_length=None, seg_overlap=30):
             arr = data_dict[key]
             end = min(start + seg_length + seg_overlap, N)
             pad_length = seg_length + seg_overlap - (end - start)
-            padding = np.zeros((pad_length, *arr.shape[1:]), dtype=arr.dtype)
+            padding = np.repeat(arr[end - 1 : end], pad_length, axis=0)
             mask.append(
                 np.hstack([np.ones(end - start), np.zeros(pad_length)])
             )
