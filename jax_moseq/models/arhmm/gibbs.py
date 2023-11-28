@@ -65,8 +65,7 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, **kwargs):
 
 
 @nan_check
-@partial(jax.jit, static_argnames=("num_states", "nlags"))
-def old_resample_ar_params(
+def resample_ar_params(
     seed, *, nlags, num_states, mask, x, z, nu_0, S_0, M_0, K_0, **kwargs
 ):
     """
@@ -104,26 +103,6 @@ def old_resample_ar_params(
     Q : jax array of shape (num_states, latent_dim, latent_dim)
         Autoregressive noise covariances.
     """
-    seeds = jr.split(seed, num_states)
-
-    masks = (
-        mask[..., nlags:].reshape(1, -1)
-        * jnp.eye(num_states)[:, z.reshape(-1)]
-    )
-    x_in = pad_affine(get_lags(x, nlags)).reshape(-1, nlags * x.shape[-1] + 1)
-    x_out = x[..., nlags:, :].reshape(-1, x.shape[-1])
-
-    map_fun = partial(
-        _resample_regression_params, x_in, x_out, nu_0, S_0, M_0, K_0
-    )
-    Ab, Q = jax.lax.map(map_fun, (seeds, masks))
-    return Ab, Q
-
-
-@nan_check
-def resample_ar_params(
-    seed, *, nlags, num_states, mask, x, z, nu_0, S_0, M_0, K_0, **kwargs
-):
     seeds = jr.split(seed, num_states)
     K_0_inv = jax.jit(psd_inv)(K_0)
 
