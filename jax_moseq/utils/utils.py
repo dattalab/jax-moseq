@@ -364,12 +364,13 @@ def get_mixed_map_gpus():
 def set_mixed_map_gpus(gpus):
     """Set the number of GPUs to use for jax.pmap in
     :py:func:`jax_moseq.utils.mixed_map`."""
+    assert gpus <= jax.device_count('gpu'), f"Only {jax.device_count('gpu')} GPUs available"
     global _MIXED_MAP_GPUS
     _MIXED_MAP_GPUS = gpus
 
 
 def _reshape_args(args, axes):
-    """Reshape args to (pmap dim, lax.map dim, vmap dim, [other dims])"""
+    """Reshape args to (lax.map dim, pmap dim, vmap dim, ...[other dims])"""
     n_iters = get_mixed_map_iters()
     n_gpus = get_mixed_map_gpus()
     axis_size = args[0].shape[axes[0]]
@@ -399,7 +400,7 @@ def _reshape_outputs(outputs, axes, axis_size):
         if axis > 0:
             a = jnp.moveaxis(a, 0, axis)
         return a
-
+    
     outputs = [_reshape(out, axis) for out, axis in zip(outputs, axes)]
     if len(outputs) == 1:
         outputs = outputs[0]
@@ -450,19 +451,28 @@ def mixed_map(fun, in_axes=None, out_axes=None):
     determined by `_MIXED_MAP_ITERS`. Each chunk is processed in parallel
     using jax.pmap to distribute across `_MIXED_MAP_GPUS` devices and jax.vmap
     within each device.
+
+    NOTE: do __not__ jit this function, as it will produce unintended side-effects,
+    such as data and compute not being efficiently utilized.
     """
+
+    def _assert_axes(axes, args, name):
+        assert axes is None or len(axes) == len(
+            args
+        ), f"`{name}` should be a tuple with the same length as the number of arguments - axis {len(axes)} != args {len(args)}"
+
+    def _to_gpu(data, i=0):
+        return jax.device_put(data, jax.devices(jax.default_backend())[i])
+
+    def _to_cpu(data, i=0):
+        return jax.device_put(data, jax.devices("cpu")[i])
 
     @functools.wraps(fun)
     def mixed_map_f(*args):
-        nonlocal in_axes
-        nonlocal out_axes
-
+        nonlocal in_axes, out_axes
+        _assert_axes(in_axes, args, "in_axes")
         if in_axes is None:
             in_axes = tuple([0] * len(args))
-        else:
-            assert len(in_axes) == len(
-                args
-            ), "`in_axes` should be a tuple with the same length as the number of arguments"
 
         mapped_args, mapped_argnums, other_args, other_argnums = _sort_args(
             args, in_axes
@@ -471,16 +481,30 @@ def mixed_map(fun, in_axes=None, out_axes=None):
             mapped_args, [in_axes[i] for i in mapped_argnums]
         )
         f = _partial(fun, other_args, mapped_argnums, other_argnums)
-        outputs = jax.lax.map(jax.pmap(jax.vmap(f)), mapped_args)
 
-        if not isinstance(outputs, tuple) or isinstance(outputs, list):
+        # __only__ jit this part, not the function that calls mixed_map
+        parallelization = jax.pmap(jax.jit(jax.vmap(f)))
+
+        # loop over mapping dim
+        outputs = []
+        for batch in range(len(mapped_args[0])):
+            # put data onto each GPU / default device
+            _args = tuple(jnp.array(arg[batch]) for arg in mapped_args)
+            # run the function
+            out = parallelization(_args)
+            outputs.append(out)
+
+        if isinstance(outputs[0], (tuple, list)):
+            outputs = tuple([jnp.array(out) for out in zip(*outputs)])
+        else:
+            outputs = jnp.array(outputs)
+
+        if not isinstance(outputs, (tuple, list)):
             outputs = (outputs,)
+
+        _assert_axes(out_axes, outputs, "out_axes")
         if out_axes is None:
             out_axes = tuple([0] * len(outputs))
-        else:
-            assert len(out_axes) == len(
-                outputs
-            ), "`out_axes` should be a tuple with the same length as the number of function outputs"
 
         outputs = _reshape_outputs(outputs, out_axes, axis_size)
         return outputs

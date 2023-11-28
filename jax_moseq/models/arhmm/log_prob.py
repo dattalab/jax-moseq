@@ -2,6 +2,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from functools import partial
+from jax_moseq.utils import mixed_map
 from jax_moseq.utils.autoregression import get_nlags, ar_log_likelihood
 
 
@@ -53,7 +54,6 @@ def continuous_stateseq_log_prob(x, z, Ab, Q, **kwargs):
     return ar_log_likelihood(x, (Ab[z], Q[z]))
 
 
-@jax.jit
 def log_joint_likelihood(x, mask, z, pi, Ab, Q, **kwargs):
     """
     Calculate the total log probability for each latent state
@@ -83,11 +83,11 @@ def log_joint_likelihood(x, mask, z, pi, Ab, Q, **kwargs):
     """
     ll = {}
 
-    log_pz = discrete_stateseq_log_prob(z, pi)
-    log_px = continuous_stateseq_log_prob(x, z, Ab, Q)
+    log_pz = mixed_map(discrete_stateseq_log_prob, in_axes=(0, None))(z, pi)
+    log_px = mixed_map(continuous_stateseq_log_prob, in_axes=(0, 0, None, None))(x, z, Ab, Q)
 
     nlags = get_nlags(Ab)
-    ll["z"] = (log_pz * mask[..., nlags + 1 :]).sum()
+    ll["z"] = (log_pz * mask[..., nlags + 1:]).sum()
     ll["x"] = (log_px * mask[..., nlags:]).sum()
     return ll
 

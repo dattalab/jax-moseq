@@ -1,4 +1,5 @@
 import jax
+import time
 import jax.numpy as jnp
 import jax.random as jr
 
@@ -23,7 +24,6 @@ from functools import partial
 na = jnp.newaxis
 
 
-@jax.jit
 def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, **kwargs):
     """
     Resamples the discrete state sequence ``z``.
@@ -53,19 +53,20 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, **kwargs):
     nlags = get_nlags(Ab)
     num_samples = mask.shape[0]
 
-    log_likelihoods = jax.lax.map(partial(ar_log_likelihood, x), (Ab, Q))
-    _, z = mixed_map(sample_hmm_stateseq, in_axes=(0, na, 0, 0))(
-        jr.split(seed, num_samples),
-        pi,
-        jnp.moveaxis(log_likelihoods, 0, -1),
-        mask.astype(float)[:, nlags:],
-    )
+    @jax.jit
+    def _sample(data, seeds, pi, mask):
+        log_likelihoods = jax.lax.map(partial(ar_log_likelihood, data), (Ab, Q))
+        _, z = sample_hmm_stateseq(seeds, pi, jnp.moveaxis(log_likelihoods, 0, -1), mask)
+        return z
+
+    z = mixed_map(_sample, in_axes=(0, 0, na, 0))(x, jr.split(seed, num_samples), pi, mask.astype(float)[:, nlags:])
+
     return z
 
 
 @nan_check
 @partial(jax.jit, static_argnames=("num_states", "nlags"))
-def resample_ar_params(
+def old_resample_ar_params(
     seed, *, nlags, num_states, mask, x, z, nu_0, S_0, M_0, K_0, **kwargs
 ):
     """
@@ -120,7 +121,50 @@ def resample_ar_params(
 
 
 @nan_check
-@jax.jit
+def resample_ar_params(
+    seed, *, nlags, num_states, mask, x, z, nu_0, S_0, M_0, K_0, **kwargs
+):
+    seeds = jr.split(seed, num_states)
+    K_0_inv = jax.jit(psd_inv)(K_0)
+
+    @jax.jit
+    def _compute_sufficient_stats(x_in, x_out, mask):
+        S_out_out = jnp.einsum("ti,tj,t->ij", x_out, x_out, mask)
+        S_out_in = jnp.einsum("ti,tj,t->ij", x_out, x_in, mask)
+        S_in_in = jnp.einsum("ti,tj,t->ij", x_in, x_in, mask)
+        return S_out_out, S_out_in, S_in_in
+
+    @jax.jit
+    def batched_sufficient_stats(x, z, mask):
+        masks = (
+            mask[..., nlags:].reshape(1, -1)
+            * jnp.eye(num_states)[:, z.reshape(-1)]
+        )
+        x_in = pad_affine(get_lags(x, nlags)).reshape(-1, nlags * x.shape[-1] + 1)
+        x_out = x[..., nlags:, :].reshape(-1, x.shape[-1])
+        S_out_out, S_out_in, S_in_in = jax.lax.map(
+            partial(_compute_sufficient_stats, x_in, x_out), masks
+        )
+        return S_out_out, S_out_in, S_in_in, masks.sum(1)
+
+    out = mixed_map(batched_sufficient_stats, in_axes=(0, 0, 0))(
+        x, z, mask
+    )
+    out = jax.tree_map(lambda x: x.sum(0), out)
+    
+    @jax.jit
+    def sample_ab_q(seed, S_out_out, S_out_in, S_in_in, mask_count):
+        K_n_inv = K_0_inv + S_in_in
+        K_n = psd_inv(K_n_inv)
+        M_n = psd_solve(K_n_inv.T, K_0_inv @ M_0.T + S_out_in.T).T
+        S_n = S_0 + S_out_out + (M_0 @ K_0_inv @ M_0.T - M_n @ K_n_inv @ M_n.T)
+        return sample_mniw(seed, nu_0 + mask_count, S_n, M_n, K_n)
+
+    Ab, Q = jax.jit(jax.vmap(sample_ab_q))(seeds, *out)
+
+    return Ab, Q
+
+
 def _resample_regression_params(x_in, x_out, nu_0, S_0, M_0, K_0, args):
     """
     Resamples regression parameters from a Matrix normal
@@ -213,19 +257,27 @@ def resample_model(
     if not states_only:
         if verbose:
             print("Resampling pi (transition matrix)")
+            start = time.time()
         params["betas"], params["pi"] = resample_hdp_transitions(
             seed, **data, **states, **params, **hypparams["trans_hypparams"]
         )
 
         if verbose:
+            print("resample HDP", time.time() - start, "s")
             print("Resampling Ab,Q (AR parameters)")
+            start = time.time()
         params["Ab"], params["Q"] = resample_ar_params(
             seed, **data, **states, **params, **hypparams["ar_hypparams"]
         )
 
     if verbose:
+        print("resample AR", time.time() - start, "s")
         print("Resampling z (discrete latent states)")
+        start = time.time()
     states["z"] = resample_discrete_stateseqs(seed, **data, **states, **params)
+
+    if verbose:
+        print("resample states", time.time() - start, "s")
 
     return {
         "seed": seed,

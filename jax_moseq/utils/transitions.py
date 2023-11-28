@@ -151,6 +151,7 @@ def _sample_beta_suffient_stats(
     rng = np.random.default_rng(seed[0].item())
     concentrations = np.array(alpha * betas)
     transition_counts = np.array(transition_counts, dtype=np.int32)
+
     # m in Fox et al.
     table_counts = _sample_loyal_crf_table_counts(
         rng, transition_counts, concentrations, kappa
