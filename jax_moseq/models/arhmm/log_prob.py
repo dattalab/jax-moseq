@@ -51,7 +51,17 @@ def continuous_stateseq_log_prob(x, z, Ab, Q, **kwargs):
     log_px : jax array of shape (..., T - n_lags)
         Log probability of ``x``.
     """
-    return ar_log_likelihood(x, (Ab[z], Q[z]))
+    one_hot = jax.nn.one_hot(z.reshape(-1), len(Ab)).T
+
+    def compute_syllable_likelihood(x, args):
+        """one_hot is a vector for an individual state in this function"""
+        one_hot, Ab, Q = args
+        one_hot = one_hot.reshape(*z.shape)
+        return ar_log_likelihood(x, (Ab, Q)) * one_hot
+
+    log_px = jax.lax.map(partial(compute_syllable_likelihood, x), (one_hot, Ab, Q)).sum(-2)
+    # log_px = ar_log_likelihood(x, (Ab[z], Q[z]))
+    return log_px
 
 
 def log_joint_likelihood(x, mask, z, pi, Ab, Q, **kwargs):
@@ -84,10 +94,12 @@ def log_joint_likelihood(x, mask, z, pi, Ab, Q, **kwargs):
     ll = {}
 
     log_pz = mixed_map(discrete_stateseq_log_prob, in_axes=(0, None))(z, pi)
-    log_px = mixed_map(continuous_stateseq_log_prob, in_axes=(0, 0, None, None))(x, z, Ab, Q)
+    log_px = mixed_map(continuous_stateseq_log_prob, in_axes=(0, 0, None, None))(
+        x, z, Ab, Q
+    )
 
     nlags = get_nlags(Ab)
-    ll["z"] = (log_pz * mask[..., nlags + 1:]).sum()
+    ll["z"] = (log_pz * mask[..., nlags + 1 :]).sum()
     ll["x"] = (log_px * mask[..., nlags:]).sum()
     return ll
 
