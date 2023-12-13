@@ -2,6 +2,8 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 
+from dynamax.hidden_markov_model.inference import hmm_smoother
+
 from jax_moseq.utils import (
     pad_affine,
     psd_solve,
@@ -17,7 +19,6 @@ from jax_moseq.utils.autoregression import (
     ar_log_likelihood,
 )
 from jax_moseq.utils.transitions import resample_hdp_transitions
-
 from functools import partial
 
 na = jnp.newaxis
@@ -63,6 +64,44 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, **kwargs):
     return z
 
 
+@jax.jit
+def stateseq_marginals(x, mask, Ab, Q, pi, **kwargs):
+    """
+    Computes the marginal probability of each discrete state at each time step.
+
+    Parameters
+    ----------
+    x : jax array of shape (N, T, latent_dim)
+        Latent trajectories.
+    mask : jax array of shape (N, T)
+        Binary indicator for valid frames.
+    Ab : jax array of shape (num_states, latent_dim, ar_dim)
+        Autoregressive transforms.
+    Q : jax array of shape (num_states, latent_dim, latent_dim)
+        Autoregressive noise covariances.
+    pi : jax_array of shape (num_states, num_states)
+        Transition probabilities.
+    **kwargs : dict
+        Overflow, for convenience.
+
+    Returns
+    ------
+    z_marginals : jax array of shape (N, T, num_states)
+        Marginal probability of each discrete state at each time step.
+    """
+    nlags = get_nlags(Ab)
+    num_states = pi.shape[0]
+
+    initial_distribution = jnp.ones(num_states) / num_states
+    log_likelihoods = jax.lax.map(partial(ar_log_likelihood, x), (Ab, Q))
+    log_likelihoods = jnp.moveaxis(log_likelihoods, 0, -1)
+    masked_log_likelihoods = log_likelihoods * mask[:, nlags:, na]
+
+    smoother = lambda lls: hmm_smoother(initial_distribution, pi, lls).smoothed_probs
+    z_marginals = mixed_map(smoother)(masked_log_likelihoods)
+    return z_marginals
+
+
 @nan_check
 @partial(jax.jit, static_argnames=("num_states", "nlags"))
 def resample_ar_params(
@@ -105,16 +144,11 @@ def resample_ar_params(
     """
     seeds = jr.split(seed, num_states)
 
-    masks = (
-        mask[..., nlags:].reshape(1, -1)
-        * jnp.eye(num_states)[:, z.reshape(-1)]
-    )
+    masks = mask[..., nlags:].reshape(1, -1) * jnp.eye(num_states)[:, z.reshape(-1)]
     x_in = pad_affine(get_lags(x, nlags)).reshape(-1, nlags * x.shape[-1] + 1)
     x_out = x[..., nlags:, :].reshape(-1, x.shape[-1])
 
-    map_fun = partial(
-        _resample_regression_params, x_in, x_out, nu_0, S_0, M_0, K_0
-    )
+    map_fun = partial(_resample_regression_params, x_in, x_out, nu_0, S_0, M_0, K_0)
     Ab, Q = jax.lax.map(map_fun, (seeds, masks))
     return Ab, Q
 
@@ -168,14 +202,7 @@ def _resample_regression_params(x_in, x_out, nu_0, S_0, M_0, K_0, args):
 
 
 def resample_model(
-    data,
-    seed,
-    states,
-    params,
-    hypparams,
-    states_only=False,
-    verbose=False,
-    **kwargs
+    data, seed, states, params, hypparams, states_only=False, verbose=False, **kwargs
 ):
     """
     Resamples the ARHMM model given the hyperparameters, data,
