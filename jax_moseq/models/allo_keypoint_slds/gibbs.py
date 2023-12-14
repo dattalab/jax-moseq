@@ -259,6 +259,7 @@ def resample_model(
     skip_noise=False,
     verbose=False,
     jitter=0,
+    parallel_message_passing=False,
     **kwargs
 ):
     """
@@ -289,6 +290,9 @@ def resample_model(
         during backward-sampling of the continuous states.
     verbose : bool, default=False
         Whether to print progress info during resampling.
+    parallel_message_passing : bool, default=False
+        Use associative scan for Kalman sampling, which is faster on
+        a GPU but has a significantly longer jit time.
 
     Returns
     ------
@@ -344,7 +348,12 @@ def resample_model(
         if verbose:
             print("Resampling x (continuous latent states)")
         states["x"] = keypoint_slds.resample_continuous_stateseqs(
-            seed, **data, **states, **params, jitter=jitter
+            seed,
+            **data,
+            **states,
+            **params,
+            jitter=jitter,
+            parallel_message_passing=parallel_message_passing
         )
 
         if verbose:
