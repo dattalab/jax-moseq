@@ -2,46 +2,15 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
-
 na = jnp.newaxis
 
-from jax_moseq.utils import pad_affine
 from jax_moseq.models.keypoint_slds import angle_to_rotation_matrix
+from jax_moseq.models.allo_dynamics.generate import generate_initial_state
 from jax_moseq.models.allo_dynamics.gibbs import wrap_angle
+from jax_moseq.models.env_allo_dynamics.gibbs import transform_keypoints
 
 
-def generate_initial_state(seed, num_states):
-    """
-    Generate initial states for the dynamics model.
-
-    Sample the initial discrete state from a uniform distribution
-    and initialize `heading=0`, `centroid=(0,0)`
-
-    Parameters
-    ----------
-    seed : jax.random.PRNGKey
-        Random seed.
-    num_states : int
-        Number of states.
-
-    Returns
-    -------
-    z : int
-        Initial discrete state.
-    h : float
-        Initial heading.
-    v : jax array of shape (2,)
-        Initial centroid.
-    seed : jax.random.PRNGKey
-        Updated random seed.
-    """
-    z = jr.choice(seed, jnp.arange(num_states))
-    h, v = jnp.zeros(1), jnp.zeros((1, 2))
-    seed = jr.split(seed)[1]
-    return z, h, v, seed
-
-
-def generate_next_state(seed, z, h, v, delta_h, sigmasq_h, delta_v, sigmasq_v, pi):
+def generate_next_state(seed, z, h, v, Y_env, delta_h, sigmasq_h, delta_v, sigmasq_v, pi):
     """
     Generate the next states of the allocentric dynamics model.
 
@@ -55,6 +24,8 @@ def generate_next_state(seed, z, h, v, delta_h, sigmasq_h, delta_v, sigmasq_v, p
         Current heading.
     v : jax array of shape (2,)
         Current centroid.
+    Y_env : jax array of shape (K_env,2)
+        Current environmental keypoint locations.
     delta_h : float
         Mean heading change for each state.
     sigmasq_h : float
@@ -79,8 +50,9 @@ def generate_next_state(seed, z, h, v, delta_h, sigmasq_h, delta_v, sigmasq_v, p
     z = jr.choice(seed, jnp.arange(pi.shape[0]), p=pi[z])
 
     # sample the next heading and centroid
-    dh = jr.normal(seed, (1,)) * jnp.sqrt(sigmasq_h[z]) + delta_h[z]
-    dv = jr.normal(seed, (2,)) * jnp.sqrt(sigmasq_v[z]) + delta_v[z]
+    X = transform_keypoints(h, v, Y_env)
+    dh = jr.normal(seed, (1,)) * jnp.sqrt(sigmasq_h[z]) + delta_h[z] @ X.flatten()
+    dv = jr.normal(seed, (2,)) * jnp.sqrt(sigmasq_v[z]) + delta_v[z] @ X.flatten()
 
     R = angle_to_rotation_matrix(-h, 2)
     v = v + dv @ R
@@ -88,9 +60,8 @@ def generate_next_state(seed, z, h, v, delta_h, sigmasq_h, delta_v, sigmasq_v, p
     return z, h, v
 
 
-def generate_states(
-    seed, pi, delta_h, sigmasq_h, delta_v, sigmasq_v, n_steps, init_state=None
-):
+def generate_states(seed, Y_env, pi, delta_h, sigmasq_h, 
+                    delta_v, sigmasq_v, init_state=None):
     """
     Generate a sequence of states from an ARHMM.
 
@@ -98,16 +69,18 @@ def generate_states(
     ----------
     seed : jax.random.PRNGKey
         Random seed.
+    Y_env : jax array of shape (n_step, K_env,2)
+        Environmental keypoint locations.
     pi : jax array of shape (num_states, num_states)
         Transition matrix.
     delta_h : float
         Mean heading change for each state.
     sigmasq_h : float
-        Variance of heading change for each state.
+        Standard deviation of heading change for each state.
     delta_v : jax array of shape (2,)
         Mean centroid change for each state.
     sigmasq_v : float
-        Variance of centroid change for each state.
+        Standard deviation of centroid change for each state.
     n_steps : int
         Number of steps to generate.
     init_states : tuple of jax arrays with shapes ((,), (nlags,latent_dim)), optional
@@ -125,18 +98,18 @@ def generate_states(
     # initialize the states
     if init_state is None:
         z, h, v, seed = generate_initial_state(seed, pi.shape[0])
-    else:
+    else: 
         z, h, v = init_state
 
     # generate the states using jax.lax.scan
-    def _generate_next_state(carry, seed):
+    def _generate_next_state(carry, args):
+        seed, Y_env_t = args
         z, h, v = carry
-        z, h, v = generate_next_state(
-            seed, z, h, v, delta_h, sigmasq_h, delta_v, sigmasq_v, pi
-        )
+        z, h, v = generate_next_state(seed, z, h, v, Y_env_t, delta_h, sigmasq_h, delta_v, sigmasq_v, pi)
         return (z, h, v), (z, h, v)
-
+    
     carry = (z, h, v)
+    n_steps = Y_env.shape[0]
     seeds = jr.split(seed, n_steps)
-    _, (zs, hs, vs) = jax.lax.scan(_generate_next_state, carry, seeds)
-    return zs, hs[:, 0], vs[:, 0]
+    _, (zs, hs, vs) = jax.lax.scan(_generate_next_state, carry, (seeds,Y_env))
+    return zs, hs[:,0], vs[:,0]

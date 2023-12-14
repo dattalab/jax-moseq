@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import jax.random as jr
 
 from jax_moseq.utils.kalman import kalman_sample
-from jax_moseq.utils.distributions import sample_vonmises_fisher, sample_scaled_inv_chi2
+from jax_moseq.utils.distributions import sample_vonmises_fisher
 
 from jax_moseq.models import arhmm, slds
 from jax_moseq.models.keypoint_slds.alignment import (
@@ -18,8 +18,9 @@ na = jnp.newaxis
 
 
 @jax.jit
-def resample_continuous_stateseqs(seed, Y, mask, v, h, s, z,
-                                  Cd, sigmasq, Ab, Q, **kwargs):
+def resample_continuous_stateseqs(seed, Y, mask, v, h, s, z, Cd,
+                                  sigmasq, Ab, Q, jitter=1e-3, 
+                                  **kwargs):
     """
     Resamples the latent trajectories ``x``.
 
@@ -47,6 +48,9 @@ def resample_continuous_stateseqs(seed, Y, mask, v, h, s, z,
         Autoregressive transforms.
     Q : jax array of shape (num_states, latent_dim, latent_dim)
         Autoregressive noise covariances.
+    jitter : float, default=1e-3
+        Amount to boost the diagonal of the covariance matrix
+        during backward-sampling of the continuous states.
     **kwargs : dict
         Overflow, for convenience.
 
@@ -56,8 +60,8 @@ def resample_continuous_stateseqs(seed, Y, mask, v, h, s, z,
         Latent trajectories.
     """
     Y, s, Cd, sigmasq = to_vanilla_slds(Y, v, h, s, Cd, sigmasq)
-    x = slds.resample_continuous_stateseqs(seed, Y, mask, z, s,
-                                           Ab, Q, Cd, sigmasq)
+    x = slds.resample_continuous_stateseqs(
+        seed, Y, mask, z, s, Ab, Q, Cd, sigmasq, jitter=jitter)
     return x
 
 
@@ -269,6 +273,7 @@ def resample_location(seed, Y, mask, x, h, s, Cd,
                     Y - Y_rot, gammasq / variance)
 
     # Apply Kalman filter to get smooth headings
+    # TODO Parameterize these distributional hyperparameter
     seed = jr.split(seed, mask.shape[0])
     m0 = jnp.zeros(d)
     S0 = jnp.eye(d) * 1e6
@@ -280,10 +285,22 @@ def resample_location(seed, Y, mask, x, h, s, Cd,
     R = jnp.repeat(gammasq, d, axis=-1)
     zz = jnp.zeros_like(mask[:,1:], dtype=int)
 
-    in_axes = (0,0,0,0,na,na,na,na,na,na,na,0)
+    masked_dynamics_noise = sigmasq_loc * 10
+    masked_obs_noise = sigmasq.max() * 10
+
+    masked_dynamics_params = {
+        'weights': jnp.eye(d),
+        'bias': jnp.zeros(d),
+        'cov': jnp.eye(d) * masked_dynamics_noise,
+    }
+
+    masked_obs_noise_diag = jnp.ones(d) * masked_obs_noise
+
+    in_axes = (0,0,0,0,na,na,na,na,na,na,na,0,na,na)
     v = jax.vmap(kalman_sample, in_axes)(
-        seed, mu, mask[:,:-1], zz, m0,
-        S0, A, B, Q, C, D, R)
+        seed, mu, mask, zz, m0,
+        S0, A, B, Q, C, D, R,
+        masked_dynamics_params, masked_obs_noise_diag)
     return v
 
 
@@ -291,7 +308,7 @@ def resample_location(seed, Y, mask, x, h, s, Cd,
 def resample_model(data, seed, states, params, hypparams,
                    noise_prior, ar_only=False, states_only=False,
                    skip_noise=False, fix_heading=False, verbose=False,
-                   **kwargs):
+                   jitter=1e-3, **kwargs):
     """
     Resamples the Keypoint SLDS model given the hyperparameters,
     data, noise prior, current states, and current parameters.
@@ -318,6 +335,9 @@ def resample_model(data, seed, states, params, hypparams,
         Whether to exclude ``sigmasq`` and ``s`` from resampling.
     fix_heading : bool, default=False
         Whether to exclude ``h`` from resampling.
+    jitter : float, default=1e-3
+        Amount to boost the diagonal of the covariance matrix
+        during backward-sampling of the continuous states.
     verbose : bool, default=False
         Whether to print progress info during resampling.
 
@@ -345,7 +365,7 @@ def resample_model(data, seed, states, params, hypparams,
 
     if verbose: print('Resampling x (continuous latent states)')
     states['x'] = resample_continuous_stateseqs(
-        seed, **data, **states, **params)
+        seed, **data, **states, **params, jitter=jitter)
 
     if not fix_heading:
         if verbose: print('Resampling h (heading)')

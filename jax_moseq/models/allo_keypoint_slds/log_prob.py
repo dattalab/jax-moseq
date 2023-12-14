@@ -4,8 +4,27 @@ from jax_moseq.models import allo_dynamics, keypoint_slds
 
 
 @jax.jit
-def log_joint_likelihood(Y, mask, x, v, h, s, z, pi, Ab, Q, Cd, sigmasq, 
-                         delta_h, sigma_h, delta_v, sigma_v, s_0=1, nu_s=1, **kwargs):
+def log_joint_likelihood(
+    Y,
+    mask,
+    x,
+    v,
+    h,
+    s,
+    z,
+    pi,
+    Ab,
+    Q,
+    Cd,
+    sigmasq,
+    delta_h,
+    sigmasq_h,
+    delta_v,
+    sigmasq_v,
+    s_0=1,
+    nu_s=1,
+    **kwargs
+):
     """
     Calculate the total log probability for each variable.
 
@@ -37,12 +56,12 @@ def log_joint_likelihood(Y, mask, x, v, h, s, z, pi, Ab, Q, Cd, sigmasq,
         Unscaled noise.
     delta_h: jax array of shape (num_states,)
         Mean change in heading for each discrete state.
-    sigma_h: jax array of shape (num_states,)
-        Standard deviation of change in heading for each discrete state.
+    sigmasq_h: jax array of shape (num_states,)
+        Variance of change in heading for each discrete state.
     delta_v: jax array of shape (num_states, 2)
         Mean change in centroid for each discrete state.
-    sigma_v: jax array of shape (num_states, 2)
-        Standard deviation of change in centroid for each discrete state.
+    sigmasq_v: jax array of shape (num_states, 2)
+        Variance of change in centroid for each discrete state.
     s_0 : scalar or jax array broadcastable to `Y`
         Prior on noise scale.
     nu_s : int
@@ -57,11 +76,22 @@ def log_joint_likelihood(Y, mask, x, v, h, s, z, pi, Ab, Q, Cd, sigmasq,
         its total log probability.
     """
     ll = keypoint_slds.log_joint_likelihood(
-        Y, mask, x, v, h, s, z, pi, Ab, Q, Cd, sigmasq, 1, s_0, nu_s)
-    
+        Y, mask, x, v, h, s, z, pi, Ab, Q, Cd, sigmasq, 1, s_0, nu_s
+    )
+
     nlags = get_nlags(Ab)
-    ll.update(allo_dynamics.log_joint_likelihood(
-        h[...,nlags-1:], v[...,nlags-1:,:], z, mask[...,nlags-1:], 
-        delta_h, sigma_h, delta_v, sigma_v, pi))
+    ll.update(
+        allo_dynamics.log_joint_likelihood(
+            h[..., nlags - 1 :],
+            v[..., nlags - 1 :, :],
+            z,
+            mask[..., nlags - 1 :],
+            delta_h,
+            sigmasq_h,
+            delta_v,
+            sigmasq_v,
+            pi,
+        )
+    )
 
     return ll

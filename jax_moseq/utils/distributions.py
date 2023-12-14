@@ -1,7 +1,14 @@
-import jax, jax.numpy as jnp, jax.random as jr
+import jax
+import jax.numpy as jnp
+import jax.random as jr
+import blackjax
 import tensorflow_probability.substrates.jax.distributions as tfd
 from dynamax.hidden_markov_model.inference import hmm_posterior_sample
 from jax_moseq.utils import nan_check, convert_data_precision
+
+
+from functools import partial
+
 na = jnp.newaxis
 
 def sample_vonmises(seed, theta, kappa):
@@ -43,6 +50,11 @@ def sample_invwishart(seed,S,nu):
     
     T = jax.scipy.linalg.solve_triangular(R.T,chol.T,lower=True).T
     return jnp.dot(T,T.T)
+
+def sample_niw(seed, mu, lam, nu, S):
+    sigma = sample_invwishart(seed, S, nu)
+    mu = jr.multivariate_normal(seed, mu, sigma/lam)
+    return mu, sigma
 
 @nan_check
 def sample_mniw(seed, nu, S, M, K):

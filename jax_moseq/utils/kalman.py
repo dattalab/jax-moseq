@@ -1,97 +1,165 @@
 import jax
 import jax.numpy as jnp
-import jax.random as jr
+from dynamax.linear_gaussian_ssm.inference import (lgssm_posterior_sample,
+                                                   _condition_on,
+                                                   ParamsLGSSM,
+                                                   ParamsLGSSMInitial,
+                                                   ParamsLGSSMDynamics,
+                                                   ParamsLGSSMEmissions)
+
 from jax_moseq.utils.autoregression import get_nlags
-from jax_moseq.utils import nan_check
 na = jnp.newaxis
 
-@nan_check
-def kalman_filter(ys, mask, zs, m0, S0, A, B, Q, C, D, Rs):
+def kalman_sample(seed, ys, mask, zs, m0, S0, A, B, Q, C, D, Rs,
+                  masked_dynamics_params, masked_obs_noise, jitter=0):
+    """Run forward-filtering and backward-sampling to draw samples from posterior
+    of a 1st-order dynamic system with autoregressive dynamics of order `n_lags`. 
+    
+    Parameters
+    ----------
+    seed: jr.PRNGKey.
+    ys: jax.Array with shape (T, obs_dim)
+        Continuous observations, minus first L+1 frames.
+    mask: jax.Array with shape (T,)
+        Indicator of observation validity, for timesteps [L-1, T)
+    zs: jax.Array with shape (T-n_lags,)
+        Discrete state sequence, taking integer values [1, n_states).
+    mu0: jax.Array with shape (ar_dim,)
+        Initial continuous state mean
+    S0: jax.Array with shape (ar_dim, ar_dim)
+        Initial continuous state covariance
+    A: jax.Array with shape (n_states, ar_dim, ar_dim)
+        State dynamics matrix
+    B: jax.Array with shape (n_states, ar_dim)
+        State input matrix
+    Q: jax.Array with shape (n_states, ar_dim, ar_dim)
+        State noise matrix
+    C: jax.Array with shape (obs_dim, ar_dim)
+        Observation transform matrix
+    D: jax.Array with shape (obs_dim,)
+        Observation input matrix
+    Rs: jax.Array with shape (T, obs_dim)
+        Observation noise scales (diagonal entries of covariance)
+    masked_dynamics_params: dict with key-value pairs
+        - weights: jax.Array with shape (ar_dim, ar_dim)
+        - bias: jax.Array with shape (ar_dim,)
+        - cov: jax.Array with shape (ar_dim, ar_dim)
+        Dynamics parameters, for masked timesteps
+    masked_obs_noise: jax.Array with shape (obs_dim,)
+        Diagonal observation noise scale, for masked timesteps.
+    jitter : float, default=0
+        Amount to boost the diagonal of the covariance matrix
+        during backward-sampling of the continuous states.
+
+    Returns
+    -------
+    xs: jax.Array with shape (T, ar_dim)
+        Sampled continuous state sequence.
     """
-    Run a Kalman filter to produce the marginal likelihood and filtered state 
-    estimates. 
-    """
 
-    def _predict(m, S, A, B, Q):
-        mu_pred = A @ m + B
-        Sigma_pred = A @ S @ A.T + Q
-        return mu_pred, Sigma_pred
+    ar_dim, obs_dim = A.shape[-1], Rs.shape[-1]
 
-    def _condition_on(m, S, C, D, R, y):
-        Sinv = jnp.linalg.inv(S)
-        S_cond = jnp.linalg.inv(Sinv + (C.T / R) @ C)
-        m_cond = S_cond @ (Sinv @ m + (C.T / R) @ (y-D))
-        return m_cond, S_cond
-    
-    def _step(carry, args):
-        m_pred, S_pred = carry
-        z, y, R = args
+    # =======================================
+    # 1. Format initial parameters, for x[0]
+    # =======================================
+    initial_params = ParamsLGSSMInitial(mean=m0, cov=S0)
 
-        m_cond, S_cond = _condition_on(
-            m_pred, S_pred, C, D, R, y)
-        
-        m_pred, S_pred = _predict(
-            m_cond, S_cond, A[z], B[z], Q[z])
-        
-        return (m_pred, S_pred), (m_cond, S_cond)
+    # ==============================
+    # 2. Format dynamics parameters
+    # ==============================
+    # Given discrete state sequence `zs``, roll-out dynamics so that all params
+    # have leading shape (T-L, ...). Apply mask for timesteps [L, -1).
+    dynamics_params=ParamsLGSSMDynamics(
+        weights=jnp.where(mask[:-1,None,None], A[zs], masked_dynamics_params['weights']),
+        bias=jnp.where(mask[:-1,None], B[zs], masked_dynamics_params['bias']),
+        input_weights=jnp.zeros((ar_dim, 0)),
+        cov=jnp.where(mask[:-1,None,None], Q[zs], masked_dynamics_params['cov']),
+    )
     
-    def _masked_step(carry, args):
-        m_pred, S_pred = carry
-        return (m_pred, S_pred), (m_pred, S_pred)
+    # ===============================
+    # 3. Format emissions parameters
+    # ===============================
+    # Apply mask to observations, shape (T-L+1, obs_dim, obs_dim)
+    Rs_masked = jnp.where(mask[:,None], Rs, masked_obs_noise)
     
-    (m_pred, S_pred),(filtered_ms, filtered_Ss) = jax.lax.scan(
-        lambda carry,args: jax.lax.cond(args[0]>0, _step, _masked_step, carry, args[1:]),
-        (m0, S0), (mask, zs, ys[:-1], Rs[:-1]))
-    
-    m_cond, S_cond = jax.lax.cond(
-        mask[-1], _condition_on, lambda *args: args[:2],
-        m_pred, S_pred, C, D, Rs[-1], ys[-1])
-    
-    filtered_ms = jnp.concatenate((filtered_ms,m_cond[na]),axis=0)
-    filtered_Ss = jnp.concatenate((filtered_Ss,S_cond[na]),axis=0)
-    return filtered_ms, filtered_Ss
+    # Inflate Rs_masked from diagonal covariance (..., obs_dim) to full covariance
+    emissions_params=ParamsLGSSMEmissions(
+        weights=C, bias=D, input_weights=jnp.zeros((obs_dim, 0)),
+        cov=jax.vmap(jnp.diag)(Rs_masked),
+    )
+
+    # ===============================
+    # 4. Put it all together
+    # ===============================
+    params = ParamsLGSSM(
+        initial=initial_params, dynamics=dynamics_params, emissions=emissions_params,
+    )
+    return lgssm_posterior_sample(seed, params, ys, jitter=jitter)
 
 
-@nan_check
-def kalman_sample(seed, ys, mask, zs, m0, S0, A, B, Q, C, D, Rs):
-    
-    # run the kalman filter
-    filtered_ms, filtered_Ss = kalman_filter(ys, mask, zs, m0, S0, A, B, Q, C, D, Rs)
-    
-    def _condition_on(m, S, A, B, Qinv, x):
-        Sinv = jnp.linalg.inv(S)
-        S_cond = jnp.linalg.inv(Sinv + A.T @ Qinv @ A)
-        m_cond = S_cond @ (Sinv @ m + A.T @ Qinv @ (x-B))
-        return m_cond, S_cond
-
-    def _step(x, args):
-        m_pred, S_pred, z, w = args
-        m_cond, S_cond = _condition_on(m_pred, S_pred, A[z], B[z], Qinv[z], x)
-        L = jnp.linalg.cholesky(S_cond)
-        x = L @ w + m_cond
-        return x, x
-    
-    def _masked_step(x, args):
-        return x,jnp.zeros_like(x)
-    
-    # precompute and sample
-    Qinv = jnp.linalg.inv(Q)
-    samples = jr.normal(seed, filtered_ms[:-1].shape)
-
-    # initialize the last state
-    x = jr.multivariate_normal(seed, filtered_ms[-1], filtered_Ss[-1])
-    
-    # scan (reverse direction)
-    args = (mask, filtered_ms[:-1], filtered_Ss[:-1], zs, samples)
-    _, xs = jax.lax.scan(lambda carry,args: jax.lax.cond(
-        args[0]>0, _step, _masked_step, carry, args[1:]), x, args, reverse=True)
-    return jnp.vstack([xs, x])
 
 
-def ar_to_lds(Ab, Q, Cd=None):
+
+def ar_to_lds_emissions(Cd, R, y, m0, S0, nlags):
     """
     Given a linear dynamical system with L'th-order autoregressive 
-    dynamics in R^D, returns a system with 1st-order dynamics in R^(D*L)
+    dynamics in R^D, returns the emission terms and initia state 
+    distribution for a system with 1st-order dynamics in R^(D*L)
+    
+    Parameters
+    ----------  
+    Cd: jax array, shape (D_obs, D+1)
+        Observation affine transformation
+    R:  jax array, shape (T, D_obs)
+        Dimension-wise observation covariances
+    y:  jax array, shape (T, D_obs)
+        Observations
+    m0: jax array, shape (D)
+        Initial state distribution mean
+    S0: jax array, shape (D, D)
+        Initial state distribution cov
+    nlags: Number of autoregressive lags
+    
+    Returns
+    -------
+    C_: jax array, shape (D_obs, D*L)
+    d_: jax array, shape (D_obs)
+    R_: jax array, shape (T, D_obs)
+    y_: jax array, shape (T, D_obs)
+    m0_: jax array, shape (D*L)
+    S0_: jax array, shape (D*L, D*L)
+    """
+    obs_dim = y.shape[-1]
+    latent_dim = Cd.shape[-1]-1
+    lds_dim = latent_dim * nlags
+    
+    C = Cd[:,:-1]
+    C_ = jnp.zeros((obs_dim, lds_dim))
+    C_ = C_.at[:,-latent_dim:].set(C)
+    d_ = Cd[:,-1]
+    
+    R_ = R[nlags-1:]
+    y_ = y[nlags-1:]
+    
+    C0 = jnp.zeros((obs_dim*(nlags-1),lds_dim))
+    for l in range(nlags-1):
+        C0 = C0.at[l*obs_dim:(l+1)*obs_dim, l*latent_dim:(l+1)*latent_dim].set(C)
+    d0 = jnp.tile(d_, (nlags-1,))
+    D0 = jnp.zeros((obs_dim*(nlags-1),2))
+    u0 = jnp.zeros(2,)
+    R0 = jnp.diag(R[:nlags-1,:].reshape(-1))
+    y0 = y[:nlags-1,:].reshape(-1)
+    m0_,S0_ = _condition_on(m0,S0,C0,D0,d0,R0,u0,y0)
+
+    return C_, d_, R_, y_, m0_, S0_
+
+            
+        
+def ar_to_lds_dynamics(Ab, Q):
+    """
+    Given a linear dynamical system with L'th-order autoregressive 
+    dynamics in R^D, returns the dynamics terms for a system with 
+    1st-order dynamics in R^(D*L)
     
     Parameters
     ----------  
@@ -99,15 +167,12 @@ def ar_to_lds(Ab, Q, Cd=None):
         AR affine transform
     Q: jax array, shape (..., D, D)
         AR noise covariance
-    Cs: jax array, shape (..., D_obs, D)
-        obs transformation
-    
+
     Returns
     -------
-    As_: jax array, shape (..., D*L, D*L)
-    bs_: jax array, shape (..., D*L)    
-    Qs_: jax array, shape (..., D*L, D*L)  
-    Cs_: jax array, shape (..., D_obs, D*L)
+    A_: jax array, shape (..., D*L, D*L)
+    b_: jax array, shape (..., D*L)    
+    Q_: jax array, shape (..., D*L, D*L)  
     """    
     nlags = get_nlags(Ab)
     latent_dim = Ab.shape[-2]
@@ -129,13 +194,4 @@ def ar_to_lds(Ab, Q, Cd=None):
     Q_ = Q_.at[..., :-latent_dim, :-latent_dim].set(eye * 1e-2)
     Q_ = Q_.at[..., -latent_dim:, -latent_dim:].set(Q)
     
-    if Cd is None:
-        return A_, b_, Q_
-    
-    C = Cd[..., :-1]
-    C_ = jnp.zeros((*C.shape[:-1], lds_dim))
-    C_ = C_.at[..., -latent_dim:].set(C)
-
-    d_ = Cd[..., -1]
-
-    return A_, b_, Q_, C_, d_
+    return A_, b_, Q_
