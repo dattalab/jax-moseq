@@ -242,6 +242,41 @@ def fit_pca(Y, mask, PCA_fitting_num_frames=1000000, verbose=False, **kwargs):
     return pca
 
 
+def wrap_angle(x):
+    """
+    Wrap an angle to the range [-pi, pi].
+    """
+    return (x + jnp.pi) % (2 * jnp.pi) - jnp.pi
+
+
+def pad_along_axis(arr, pad_widths, axis=0, value=0):
+    """
+    Pad an array along a single axis
+
+    Parameters
+    -------
+    arr: ndarray, Array to be padded
+    pad_widths: tuple (int,int), Amount of padding on either end
+    axis: int, Axis along which to add padding
+    value: float, Value of padded array elements
+
+    Returns
+    _______
+    padded_arr: ndarray
+    """
+    pad_left_shape = list(arr.shape)
+    pad_right_shape = list(arr.shape)
+
+    pad_left_shape[axis] = pad_widths[0]
+    pad_right_shape[axis] = pad_widths[1]
+
+    padding_left = jnp.ones(pad_left_shape, dtype=arr.dtype) * value
+    padding_right = jnp.ones(pad_right_shape, dtype=arr.dtype) * value
+
+    padded_arr = jnp.concatenate([padding_left, arr, padding_right], axis=axis)
+    return padded_arr
+
+
 def unbatch(data, keys, bounds):
     """
     Invert :py:func:`jax_moseq.utils.batch`
@@ -276,9 +311,10 @@ def unbatch(data, keys, bounds):
 
 def batch(data_dict, keys=None, seg_length=None, seg_overlap=30):
     """
-    Stack time-series data of different lengths into a single array for
-    batch processing, optionally breaking up the data into fixed length
-    segments. Data is 0-padded so that the stacked array isn't ragged.
+    Stack time-series data of different lengths into a single array for batch
+    processing, optionally breaking up the data into fixed length segments. The
+    data is padded so that the stacked array isn't ragged. The padding
+    repeats the last frame of each time-series until the end of the segment.
 
     Parameters
     ----------
@@ -328,10 +364,8 @@ def batch(data_dict, keys=None, seg_length=None, seg_overlap=30):
             arr = data_dict[key]
             end = min(start + seg_length + seg_overlap, N)
             pad_length = seg_length + seg_overlap - (end - start)
-            padding = np.zeros((pad_length, *arr.shape[1:]), dtype=arr.dtype)
-            mask.append(
-                np.hstack([np.ones(end - start), np.zeros(pad_length)])
-            )
+            padding = np.repeat(arr[end - 1 : end], pad_length, axis=0)
+            mask.append(np.hstack([np.ones(end - start), np.zeros(pad_length)]))
             stack.append(np.concatenate([arr[start:end], padding], axis=0))
             keys_out.append(key)
             bounds.append((start, end))

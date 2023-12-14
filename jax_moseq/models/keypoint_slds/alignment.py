@@ -97,7 +97,7 @@ def estimate_coordinates(x, v, h, Cd, **kwargs):
 
 def estimate_aligned(x, Cd, k):
     """
-    Computed estimated positions of aligned keypoints
+    Compute estimated positions of aligned keypoints
     (i.e. prior to applying the rigid transform).
 
     Parameters
@@ -172,23 +172,25 @@ def inverse_rigid_transform(Y, v, h):
     return apply_rotation(Y - v[..., na, :], -h)
 
 
-def center_embedding(k):
+def center_embedding(n):
     """
-    Generates a matrix ``Gamma`` that maps from a (k-1)-dimensional
+    Generates a matrix ``Gamma`` that maps from a (n-1)-dimensional
     vector space  to the space of k-tuples with zero mean
 
     Parameters
     ----------
-    k : int
+    n : int
         Number of keypoints.
 
     Returns
     -------
-    Gamma: jax array of shape (k, k - 1)
+    Gamma: jax array of shape (n, n - 1)
         Matrix to map to centered embedded space.
     """
-    # using numpy.linalg.svd because jax version crashes on windows
-    return jnp.array(np.linalg.svd(np.eye(k) - np.ones((k, k)) / k)[0][:, :-1])
+    X = jnp.tril(jnp.ones((n, n)), k=-1)[1:]
+    X = jnp.eye(n)[1:] - X / X.sum(1)[:, na]
+    X = X / jnp.sqrt((X**2).sum(1))[:, na]
+    return X.T
 
 
 def apply_rotation(Y, h):

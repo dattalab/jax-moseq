@@ -68,22 +68,7 @@ def obs_log_prob(Y, x, v, h, s, Cd, sigmasq, **kwargs):
 
 @jax.jit
 def log_joint_likelihood(
-    Y,
-    mask,
-    x,
-    v,
-    h,
-    s,
-    z,
-    pi,
-    Ab,
-    Q,
-    Cd,
-    sigmasq,
-    sigmasq_loc,
-    s_0,
-    nu_s,
-    **kwargs
+    Y, mask, x, v, h, s, z, pi, Ab, Q, Cd, sigmasq, sigmasq_loc, s_0, nu_s, **kwargs
 ):
     """
     Calculate the total log probability for each latent state.

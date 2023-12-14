@@ -2,10 +2,14 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 from functools import partial
-
-from jax_moseq.utils.kalman import kalman_sample, ar_to_lds
 from jax_moseq.utils import mixed_map, apply_affine
 from jax_moseq.models import arhmm
+from jax_moseq.utils.kalman import (
+    kalman_sample,
+    ar_to_lds_dynamics,
+    ar_to_lds_emissions,
+)
+
 
 na = jnp.newaxis
 
@@ -66,10 +70,8 @@ def resample_continuous_stateseqs(
     n_lags = Ab.shape[2] // latent_dim
 
     # TODO Parameterize these distributional hyperparameter
-    init_dynamics_mean = jnp.zeros(latent_dim * n_lags)
-    init_dynamics_cov = 10 * jnp.eye(
-        latent_dim * n_lags
-    )  # TODO: hard coded constant 10
+    m0 = jnp.zeros(latent_dim * n_lags)
+    S0 = 10 * jnp.eye(latent_dim * n_lags)  # TODO: hard coded constant 10
     masked_dynamics_noise = 10
     masked_obs_noise = 10
 
@@ -85,7 +87,11 @@ def resample_continuous_stateseqs(
     # ==========================================================================
     # 2. Reformat L'th-order AR dynamics in R^D to 1st-order dynamics in R^{DL}
     # ==========================================================================
-    A_, b_, Q_, C_, d_ = ar_to_lds(Ab, Q, Cd)
+    C_, d_, R_, y_, m0_, S0_ = jax.vmap(
+        ar_to_lds_emissions, in_axes=(na, 0, 0, na, na, na)
+    )(Cd, sigmasq * s, y, m0, S0, n_lags)
+
+    A_, b_, Q_ = ar_to_lds_dynamics(Ab, Q)
 
     # =============================================
     # 3. Formulate parameters for masked timesteps
@@ -116,17 +122,15 @@ def resample_continuous_stateseqs(
     # ==================================================
     in_axes = (0, 0, 0, 0, na, na, na, na, na, na, na, 0, na, na)
     x = mixed_map(
-        partial(
-            kalman_sample, jitter=jitter, parallel=parallel_message_passing
-        ),
+        partial(kalman_sample, jitter=jitter, parallel=parallel_message_passing),
         in_axes,
     )(
         jr.split(seed, n_recordings),
         y_,
         mask_,
         z,
-        init_dynamics_mean,
-        init_dynamics_cov,
+        m0,
+        S0,
         A_,
         b_,
         Q_,
@@ -142,9 +146,7 @@ def resample_continuous_stateseqs(
     # =========================================================================
     x = jnp.concatenate(
         [
-            x[:, 0, : (n_lags - 1) * latent_dim].reshape(
-                -1, n_lags - 1, latent_dim
-            ),
+            x[:, 0, : (n_lags - 1) * latent_dim].reshape(-1, n_lags - 1, latent_dim),
             x[:, :, -latent_dim:],
         ],
         axis=1,
@@ -154,9 +156,7 @@ def resample_continuous_stateseqs(
 
 
 @jax.jit
-def resample_obs_variance(
-    seed, Y, mask, x, s, Cd, nu_sigma, sigmasq_0, **kwargs
-):
+def resample_obs_variance(seed, Y, mask, x, s, Cd, nu_sigma, sigmasq_0, **kwargs):
     """
     Resample the observation variance `sigmasq`.
 
@@ -187,9 +187,7 @@ def resample_obs_variance(
         Unscaled noise.
     """
     sqerr = compute_squared_error(Y, x, Cd, mask)
-    return resample_obs_variance_from_sqerr(
-        seed, sqerr, mask, s, nu_sigma, sigmasq_0
-    )
+    return resample_obs_variance_from_sqerr(seed, sqerr, mask, s, nu_sigma, sigmasq_0)
 
 
 @jax.jit
@@ -394,9 +392,7 @@ def resample_model(
         Dictionary containing the hyperparameters and
         updated seed, states, and parameters of the model.
     """
-    model = arhmm.resample_model(
-        data, seed, states, params, hypparams, states_only
-    )
+    model = arhmm.resample_model(data, seed, states, params, hypparams, states_only)
     if ar_only:
         return model
 

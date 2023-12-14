@@ -3,6 +3,11 @@ import jax.numpy as jnp
 import numpy as np
 from functools import partial
 from jax_moseq.utils.autoregression import get_nlags, ar_log_likelihood
+from jax_moseq.utils import mixed_map
+from dynamax.hidden_markov_model.inference import hmm_filter
+from functools import partial
+
+na = jnp.newaxis
 
 
 def discrete_stateseq_log_prob(z, pi, **kwargs):
@@ -94,8 +99,13 @@ def log_joint_likelihood(x, mask, z, pi, Ab, Q, **kwargs):
 
 def model_likelihood(data, states, params, hypparams=None, **kwargs):
     """
+<<<<<<< HEAD
+    Convenience function that invokes :py:func:`jax_moseq.models.arhmm.log_prob.log_joint_likelihood`.
+    
+=======
     Convenience class that invokes :py:func:`jax_moseq.models.arhmm.log_prob.log_joint_likelihood`.
 
+>>>>>>> dev
     Parameters
     ----------
     data : dict
@@ -140,3 +150,38 @@ def state_cross_likelihoods(params, states, mask, **kwargs):
         ll = log_likelihoods[z == j].sum(0)
         cross_likelihoods[j] = (ll - ll[j]) / (counts[j] + 1e-6)
     return cross_likelihoods
+
+
+@jax.jit
+def marginal_log_likelihood(mask, x, Ab, Q, pi, **kwargs):
+    """Marginal log likelihood of continuous latents given model parameters.
+
+    Parameters
+    ----------
+    mask : jax array
+        Binary indicator for which data points are valid.
+    x : jax array of shape (..., T, latent_dim)
+        Latent trajectories.
+    Ab : jax array of shape (num_states, latent_dim, ar_dim)
+        Autoregressive transforms.
+    Q : jax array of shape (num_states, latent_dim, latent_dim)
+        Autoregressive noise covariances.
+    pi : jax_array of shape (num_states, num_states)
+        Transition probabilities.
+
+    Returns
+    -------
+    ml : float
+        Marginal log likelihood.
+    """
+    nlags = get_nlags(Ab)
+    num_states = pi.shape[0]
+
+    initial_distribution = jnp.ones(num_states) / num_states
+    log_likelihoods = jax.lax.map(partial(ar_log_likelihood, x), (Ab, Q))
+    log_likelihoods = jnp.moveaxis(log_likelihoods, 0, -1)
+    masked_log_likelihoods = log_likelihoods * mask[:, nlags:, None]
+
+    get_mll = lambda ll: hmm_filter(initial_distribution, pi, ll).marginal_loglik.sum()
+    mlls = mixed_map(get_mll)(masked_log_likelihoods)
+    return mlls.sum()

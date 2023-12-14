@@ -94,9 +94,7 @@ def resample_continuous_stateseqs(
 
 
 @jax.jit
-def resample_obs_variance(
-    seed, Y, mask, Cd, x, v, h, s, nu_sigma, sigmasq_0, **kwargs
-):
+def resample_obs_variance(seed, Y, mask, Cd, x, v, h, s, nu_sigma, sigmasq_0, **kwargs):
     """
     Resample the observation variance ``sigmasq``.
 
@@ -243,9 +241,7 @@ def resample_heading(seed, Y, x, v, s, Cd, sigmasq, **kwargs):
     variance = s * sigmasq
 
     # [(..., t, k, d, na) * (..., t, k, na, d) / (..., t, k, na, na)] -> (..., t, d, d)
-    S = (Y_bar[..., :2, na] * Y_cent[..., na, :2] / variance[..., na, na]).sum(
-        -3
-    )
+    S = (Y_bar[..., :2, na] * Y_cent[..., na, :2] / variance[..., na, na]).sum(-3)
     del Y_bar, Y_cent, variance  # free up memory
 
     kappa_cos = S[..., 0, 0] + S[..., 1, 1]
@@ -340,9 +336,7 @@ def resample_location(
     masked_obs_noise_diag = jnp.ones(d) * masked_obs_noise
 
     in_axes = (0, 0, 0, 0, na, na, na, na, na, na, na, 0, na, na)
-    v = jax.vmap(
-        partial(kalman_sample, parallel=parallel_message_passing), in_axes
-    )(
+    v = jax.vmap(partial(kalman_sample, parallel=parallel_message_passing), in_axes)(
         seed,
         mu,
         mask,
