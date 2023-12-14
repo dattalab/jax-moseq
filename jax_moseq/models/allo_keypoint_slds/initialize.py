@@ -9,13 +9,17 @@ from jax_moseq.models import keypoint_slds
 from jax_moseq.models.allo_dynamics import init_allocentric_dynamics_params
 
 
-def init_model(hypparams=None, allo_hypparams=None, seed=jr.PRNGKey(0), **kwargs):
+def init_model(
+    data=None, hypparams=None, allo_hypparams=None, seed=jr.PRNGKey(0), **kwargs
+):
     """
     Initialize a allocentric keypoint SLDS model.
     """
     _check_init_args(hypparams, allo_hypparams)
 
-    model = keypoint_slds.init_model(hypparams=hypparams, seed=seed, **kwargs)
+    model = keypoint_slds.init_model(
+        data=data, hypparams=hypparams, seed=seed, **kwargs
+    )
 
     if allo_hypparams is not None:
         model["hypparams"]["allo_hypparams"] = allo_hypparams
