@@ -18,12 +18,6 @@ from jax_moseq.models.keypoint_slds.alignment import (
 na = jnp.newaxis
 
 
-<<<<<<< HEAD
-@jax.jit
-def resample_continuous_stateseqs(seed, Y, mask, v, h, s, z, Cd,
-                                  sigmasq, Ab, Q, jitter=1e-3, 
-                                  **kwargs):
-=======
 @partial(jax.jit, static_argnames=("parallel_message_passing",))
 def resample_continuous_stateseqs(
     seed,
@@ -41,7 +35,6 @@ def resample_continuous_stateseqs(
     parallel_message_passing=True,
     **kwargs
 ):
->>>>>>> dev
     """
     Resamples the latent trajectories ``x``.
 
@@ -72,12 +65,9 @@ def resample_continuous_stateseqs(
     jitter : float, default=1e-3
         Amount to boost the diagonal of the covariance matrix
         during backward-sampling of the continuous states.
-<<<<<<< HEAD
-=======
     parallel_message_passing : bool, default=True,
         Use associative scan for Kalman sampling, which is faster on
         a GPU but has a significantly longer jit time.
->>>>>>> dev
     **kwargs : dict
         Overflow, for convenience.
 
@@ -88,9 +78,6 @@ def resample_continuous_stateseqs(
     """
     Y, s, Cd, sigmasq = to_vanilla_slds(Y, v, h, s, Cd, sigmasq)
     x = slds.resample_continuous_stateseqs(
-<<<<<<< HEAD
-        seed, Y, mask, z, s, Ab, Q, Cd, sigmasq, jitter=jitter)
-=======
         seed,
         Y,
         mask,
@@ -103,14 +90,11 @@ def resample_continuous_stateseqs(
         jitter=jitter,
         parallel_message_passing=parallel_message_passing,
     )
->>>>>>> dev
     return x
 
 
 @jax.jit
-def resample_obs_variance(
-    seed, Y, mask, Cd, x, v, h, s, nu_sigma, sigmasq_0, **kwargs
-):
+def resample_obs_variance(seed, Y, mask, Cd, x, v, h, s, nu_sigma, sigmasq_0, **kwargs):
     """
     Resample the observation variance ``sigmasq``.
 
@@ -257,9 +241,7 @@ def resample_heading(seed, Y, x, v, s, Cd, sigmasq, **kwargs):
     variance = s * sigmasq
 
     # [(..., t, k, d, na) * (..., t, k, na, d) / (..., t, k, na, na)] -> (..., t, d, d)
-    S = (Y_bar[..., :2, na] * Y_cent[..., na, :2] / variance[..., na, na]).sum(
-        -3
-    )
+    S = (Y_bar[..., :2, na] * Y_cent[..., na, :2] / variance[..., na, na]).sum(-3)
     del Y_bar, Y_cent, variance  # free up memory
 
     kappa_cos = S[..., 0, 0] + S[..., 1, 1]
@@ -346,38 +328,15 @@ def resample_location(
     masked_obs_noise = sigmasq.max() * 10
 
     masked_dynamics_params = {
-<<<<<<< HEAD
-        'weights': jnp.eye(d),
-        'bias': jnp.zeros(d),
-        'cov': jnp.eye(d) * masked_dynamics_noise,
-=======
         "weights": jnp.eye(d),
         "bias": jnp.zeros(d),
         "cov": jnp.eye(d) * masked_dynamics_noise,
->>>>>>> dev
     }
 
     masked_obs_noise_diag = jnp.ones(d) * masked_obs_noise
 
-<<<<<<< HEAD
-    in_axes = (0,0,0,0,na,na,na,na,na,na,na,0,na,na)
-    v = jax.vmap(kalman_sample, in_axes)(
-        seed, mu, mask, zz, m0,
-        S0, A, B, Q, C, D, R,
-        masked_dynamics_params, masked_obs_noise_diag)
-    return v
-
-
-
-def resample_model(data, seed, states, params, hypparams,
-                   noise_prior, ar_only=False, states_only=False,
-                   skip_noise=False, fix_heading=False, verbose=False,
-                   jitter=1e-3, **kwargs):
-=======
     in_axes = (0, 0, 0, 0, na, na, na, na, na, na, na, 0, na, na)
-    v = jax.vmap(
-        partial(kalman_sample, parallel=parallel_message_passing), in_axes
-    )(
+    v = jax.vmap(partial(kalman_sample, parallel=parallel_message_passing), in_axes)(
         seed,
         mu,
         mask,
@@ -413,7 +372,6 @@ def resample_model(
     parallel_message_passing=False,
     **kwargs
 ):
->>>>>>> dev
     """
     Resamples the Keypoint SLDS model given the hyperparameters,
     data, noise prior, current states, and current parameters.
@@ -468,11 +426,6 @@ def resample_model(
     params = model["params"].copy()
     states = model["states"].copy()
 
-<<<<<<< HEAD
-    if verbose: print('Resampling x (continuous latent states)')
-    states['x'] = resample_continuous_stateseqs(
-        seed, **data, **states, **params, jitter=jitter)
-=======
     if (not states_only) and resample_global_noise_scale:
         if verbose:
             print("Resampling sigmasq (global noise scales)")
@@ -495,7 +448,6 @@ def resample_model(
         jitter=jitter,
         parallel_message_passing=parallel_message_passing
     )
->>>>>>> dev
 
     if not fix_heading:
         if verbose:

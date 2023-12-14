@@ -3,15 +3,6 @@ import jax
 import jax.numpy as jnp
 from sklearn.decomposition import PCA
 from jax.scipy.linalg import cho_factor, cho_solve
-<<<<<<< HEAD
-
-
-def wrap_angle(x):
-    """
-    Wrap an angle to the range [-pi, pi].
-    """
-    return (x + jnp.pi) % (2 * jnp.pi) - jnp.pi
-=======
 from textwrap import fill
 import functools
 from math import ceil
@@ -136,13 +127,11 @@ def get_frequencies(stateseqs, mask=None, num_states=None, runlength=True):
     counts = np.bincount(stateseq_flat, minlength=num_states)
     frequencies = counts / counts.sum()
     return frequencies
->>>>>>> dev
 
 
 def symmetrize(A):
     """Symmetrize a matrix."""
     return (A + A.swapaxes(-1, -2)) / 2
-    
 
 
 def psd_solve(A, B, diagonal_boost=1e-6):
@@ -253,7 +242,13 @@ def fit_pca(Y, mask, PCA_fitting_num_frames=1000000, verbose=False, **kwargs):
     return pca
 
 
-<<<<<<< HEAD
+def wrap_angle(x):
+    """
+    Wrap an angle to the range [-pi, pi].
+    """
+    return (x + jnp.pi) % (2 * jnp.pi) - jnp.pi
+
+
 def pad_along_axis(arr, pad_widths, axis=0, value=0):
     """
     Pad an array along a single axis
@@ -275,18 +270,14 @@ def pad_along_axis(arr, pad_widths, axis=0, value=0):
     pad_left_shape[axis] = pad_widths[0]
     pad_right_shape[axis] = pad_widths[1]
 
-    padding_left = jnp.ones(pad_left_shape, dtype=arr.dtype)*value
-    padding_right = jnp.ones(pad_right_shape, dtype=arr.dtype)*value
+    padding_left = jnp.ones(pad_left_shape, dtype=arr.dtype) * value
+    padding_right = jnp.ones(pad_right_shape, dtype=arr.dtype) * value
 
     padded_arr = jnp.concatenate([padding_left, arr, padding_right], axis=axis)
     return padded_arr
 
 
-
-def unbatch(data, labels): 
-=======
 def unbatch(data, keys, bounds):
->>>>>>> dev
     """
     Invert :py:func:`jax_moseq.utils.batch`
 
@@ -374,9 +365,7 @@ def batch(data_dict, keys=None, seg_length=None, seg_overlap=30):
             end = min(start + seg_length + seg_overlap, N)
             pad_length = seg_length + seg_overlap - (end - start)
             padding = np.repeat(arr[end - 1 : end], pad_length, axis=0)
-            mask.append(
-                np.hstack([np.ones(end - start), np.zeros(pad_length)])
-            )
+            mask.append(np.hstack([np.ones(end - start), np.zeros(pad_length)]))
             stack.append(np.concatenate([arr[start:end], padding], axis=0))
             keys_out.append(key)
             bounds.append((start, end))

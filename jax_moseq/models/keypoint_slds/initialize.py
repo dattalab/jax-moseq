@@ -108,9 +108,7 @@ def init_params(
         Values for each model parameter.
     """
     params = arhmm.init_params(seed, trans_hypparams, ar_hypparams)
-    params["Cd"] = slds.init_obs_params(
-        pca, Y_flat, mask, whiten, **ar_hypparams
-    )
+    params["Cd"] = slds.init_obs_params(pca, Y_flat, mask, whiten, **ar_hypparams)
     params["sigmasq"] = jnp.ones(k)
     return params
 
@@ -139,9 +137,7 @@ def init_hyperparams(
     hypparams : dict
         Values for each group of hyperparameters.
     """
-    hyperparams = slds.init_hyperparams(
-        trans_hypparams, ar_hypparams, obs_hypparams
-    )
+    hyperparams = slds.init_hyperparams(trans_hypparams, ar_hypparams, obs_hypparams)
     hyperparams["cen_hypparams"] = cen_hypparams.copy()
     return hyperparams
 
@@ -318,12 +314,8 @@ def init_model(
             if not exclude_outliers_for_pca or conf is None:
                 pca_mask = mask
             else:
-                pca_mask = jnp.logical_and(
-                    mask, (conf > conf_threshold).all(-1)
-                )
-            pca = utils.fit_pca(
-                Y_flat, pca_mask, PCA_fitting_num_frames, verbose
-            )
+                pca_mask = jnp.logical_and(mask, (conf > conf_threshold).all(-1))
+            pca = utils.fit_pca(Y_flat, pca_mask, PCA_fitting_num_frames, verbose)
 
         params = init_params(
             seed, pca, Y_flat, mask, **hypparams, whiten=whiten, k=Y.shape[-2]
@@ -437,50 +429,11 @@ def _check_init_args(
         is insufficient for model initialization.
     """
     if not (data or (states and params)):
-<<<<<<< HEAD
-        raise ValueError('Must provide either `data` or '
-                         'both `states` and `params`.')
-            
-    if not (hypparams or (trans_hypparams and
-                          ar_hypparams and
-                          obs_hypparams and
-                          cen_hypparams)):
-        raise ValueError('Must provide either `hypparams` or '
-                         'all of `trans_hypparams`, `ar_hypparams`, '
-                         '`obs_hypparams`, and `cen_hypparams`.')
-        
-    if has_conf and ((noise_prior is None) and
-                     (error_estimator is None)):
-        raise ValueError('If confidences are provided, must also provide '
-                         'either `error_estimator` or `noise_prior`.')
-        
-    if not (states and params) and (anterior_idxs is None or
-                                    posterior_idxs is None):
-        raise ValueError('If `states` and `params` not provided, must '
-                         'provide `anterior_idxs` and `posterior_idxs`.')
-    
-    if data is not None:
-        num_keypoints = data['Y'].shape[-2]
-        if ar_hypparams is None: 
-            ar_hypparams = hypparams['ar_hypparams']
-        latent_dim = ar_hypparams['latent_dim']
-
-        assert latent_dim <= (num_keypoints - 1)*2, \
-            '`latent_dim` must be <=(num_keypoints - 1)*2'
-        
-=======
-        raise ValueError(
-            "Must provide either `data` or " "both `states` and `params`."
-        )
+        raise ValueError("Must provide either `data` or " "both `states` and `params`.")
 
     if not (
         hypparams
-        or (
-            trans_hypparams
-            and ar_hypparams
-            and obs_hypparams
-            and cen_hypparams
-        )
+        or (trans_hypparams and ar_hypparams and obs_hypparams and cen_hypparams)
     ):
         raise ValueError(
             "Must provide either `hypparams` or "
@@ -494,11 +447,8 @@ def _check_init_args(
             "either `error_estimator` or `noise_prior`."
         )
 
-    if not (states and params) and (
-        anterior_idxs is None or posterior_idxs is None
-    ):
+    if not (states and params) and (anterior_idxs is None or posterior_idxs is None):
         raise ValueError(
             "If `states` and `params` not provided, must "
             "provide `anterior_idxs` and `posterior_idxs`."
         )
->>>>>>> dev

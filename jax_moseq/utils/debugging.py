@@ -45,10 +45,10 @@ def check_precision(fn):
 
         if len(args_with_wrong_precision) > 0:
             msg = f'JAX is configured to use {"64" if x64 else "32"}-bit precision, '
-            msg += f'but following arguments contain {"32" if x64 else "64"}-bit arrays: '
-            msg += ", ".join(
-                [f'"{name}"' for name in args_with_wrong_precision]
+            msg += (
+                f'but following arguments contain {"32" if x64 else "64"}-bit arrays: '
             )
+            msg += ", ".join([f'"{name}"' for name in args_with_wrong_precision])
             msg += '. Either change the JAX config using `jax.config.update("jax_enable_x64", True/False)` '
             msg += "or convert the arguments to the correct precision using `jax_moseq.utils.utils.convert_data_precision`."
             raise ValueError(msg)
@@ -193,12 +193,8 @@ class checked_function_args:
         >>> print(args)
         {'func': ((0, 2), {}), 'caller_of_func': ((0, 2), {})}
     """
-<<<<<<< HEAD
-    def __init__(self, disable_jit=True):
-=======
 
     def __init__(self):
->>>>>>> dev
         self.inputs_dict = {}
         self.active = False
         self.disable_jit = disable_jit
@@ -221,9 +217,7 @@ class checked_function_args:
 
             # Extract the traceback and filter out frames from the 'wrapper'
             tb_frames = traceback.extract_tb(exc_traceback)
-            filtered_frames = [
-                frame for frame in tb_frames if frame.name != "wrapper"
-            ]
+            filtered_frames = [frame for frame in tb_frames if frame.name != "wrapper"]
 
             # Format the filtered frames in a pretty way
             formatted_frames = traceback.format_list(filtered_frames)

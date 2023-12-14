@@ -1,22 +1,5 @@
 import jax
 import jax.numpy as jnp
-<<<<<<< HEAD
-from dynamax.linear_gaussian_ssm.inference import (lgssm_posterior_sample,
-                                                   _condition_on,
-                                                   ParamsLGSSM,
-                                                   ParamsLGSSMInitial,
-                                                   ParamsLGSSMDynamics,
-                                                   ParamsLGSSMEmissions)
-
-from jax_moseq.utils.autoregression import get_nlags
-na = jnp.newaxis
-
-def kalman_sample(seed, ys, mask, zs, m0, S0, A, B, Q, C, D, Rs,
-                  masked_dynamics_params, masked_obs_noise, jitter=0):
-    """Run forward-filtering and backward-sampling to draw samples from posterior
-    of a 1st-order dynamic system with autoregressive dynamics of order `n_lags`. 
-    
-=======
 import jax.random as jr
 from jax import lax
 
@@ -25,6 +8,7 @@ from dynamax.linear_gaussian_ssm.parallel_inference import (
 )
 from dynamax.linear_gaussian_ssm.inference import (
     lgssm_posterior_sample as serial_lgssm_sample,
+    _condition_on,
     ParamsLGSSM,
     ParamsLGSSMInitial,
     ParamsLGSSMDynamics,
@@ -57,7 +41,6 @@ def kalman_sample(
     """Run forward-filtering and backward-sampling to draw samples from posterior
     of a 1st-order dynamic system with autoregressive dynamics of order `n_lags`.
 
->>>>>>> dev
     Parameters
     ----------
     seed: jr.PRNGKey.
@@ -93,12 +76,9 @@ def kalman_sample(
     jitter : float, default=0
         Amount to boost the diagonal of the covariance matrix
         during backward-sampling of the continuous states.
-<<<<<<< HEAD
-=======
     parallel : bool, default=True,
         Use associative scan for Kalman sampling, which is faster on
         a GPU but has a significantly longer jit time.
->>>>>>> dev
 
     Returns
     -------
@@ -106,46 +86,6 @@ def kalman_sample(
         Sampled continuous state sequence.
     """
 
-<<<<<<< HEAD
-    ar_dim, obs_dim = A.shape[-1], Rs.shape[-1]
-
-    # =======================================
-    # 1. Format initial parameters, for x[0]
-    # =======================================
-    initial_params = ParamsLGSSMInitial(mean=m0, cov=S0)
-
-    # ==============================
-    # 2. Format dynamics parameters
-    # ==============================
-    # Given discrete state sequence `zs``, roll-out dynamics so that all params
-    # have leading shape (T-L, ...). Apply mask for timesteps [L, -1).
-    dynamics_params=ParamsLGSSMDynamics(
-        weights=jnp.where(mask[:-1,None,None], A[zs], masked_dynamics_params['weights']),
-        bias=jnp.where(mask[:-1,None], B[zs], masked_dynamics_params['bias']),
-        input_weights=jnp.zeros((ar_dim, 0)),
-        cov=jnp.where(mask[:-1,None,None], Q[zs], masked_dynamics_params['cov']),
-    )
-    
-    # ===============================
-    # 3. Format emissions parameters
-    # ===============================
-    # Apply mask to observations, shape (T-L+1, obs_dim, obs_dim)
-    Rs_masked = jnp.where(mask[:,None], Rs, masked_obs_noise)
-    
-    # Inflate Rs_masked from diagonal covariance (..., obs_dim) to full covariance
-    emissions_params=ParamsLGSSMEmissions(
-        weights=C, bias=D, input_weights=jnp.zeros((obs_dim, 0)),
-        cov=jax.vmap(jnp.diag)(Rs_masked),
-    )
-
-    # ===============================
-    # 4. Put it all together
-    # ===============================
-    params = ParamsLGSSM(
-        initial=initial_params, dynamics=dynamics_params, emissions=emissions_params,
-    )
-    return lgssm_posterior_sample(seed, params, ys, jitter=jitter)
-=======
     n_states, _, ar_dim, obs_dim = *A.shape, Rs.shape[-1]
     initial_params = ParamsLGSSMInitial(mean=m0, cov=S0)
 
@@ -160,7 +100,6 @@ def kalman_sample(
         cov=lambda t: Q_and_mask[zs_masked[t]],
         input_weights=jnp.zeros((ar_dim, 0)),
     )
->>>>>>> dev
 
     emissions_params = ParamsLGSSMEmissions(
         weights=C,
@@ -169,8 +108,6 @@ def kalman_sample(
         cov=jnp.where(mask[:, None], Rs, masked_obs_noise),
     )
 
-<<<<<<< HEAD
-=======
     params = ParamsLGSSM(
         initial=initial_params,
         dynamics=dynamics_params,
@@ -181,19 +118,16 @@ def kalman_sample(
         return parallel_lgssm_sample(seed, params, ys)
     else:
         return serial_lgssm_sample(seed, params, ys, jitter=jitter)
->>>>>>> dev
-
 
 
 def ar_to_lds_emissions(Cd, R, y, m0, S0, nlags):
     """
-<<<<<<< HEAD
-    Given a linear dynamical system with L'th-order autoregressive 
-    dynamics in R^D, returns the emission terms and initia state 
+    Given a linear dynamical system with L'th-order autoregressive
+    dynamics in R^D, returns the emission terms and initia state
     distribution for a system with 1st-order dynamics in R^(D*L)
-    
+
     Parameters
-    ----------  
+    ----------
     Cd: jax array, shape (D_obs, D+1)
         Observation affine transformation
     R:  jax array, shape (T, D_obs)
@@ -205,7 +139,7 @@ def ar_to_lds_emissions(Cd, R, y, m0, S0, nlags):
     S0: jax array, shape (D, D)
         Initial state distribution cov
     nlags: Number of autoregressive lags
-    
+
     Returns
     -------
     C_: jax array, shape (D_obs, D*L)
@@ -216,68 +150,53 @@ def ar_to_lds_emissions(Cd, R, y, m0, S0, nlags):
     S0_: jax array, shape (D*L, D*L)
     """
     obs_dim = y.shape[-1]
-    latent_dim = Cd.shape[-1]-1
+    latent_dim = Cd.shape[-1] - 1
     lds_dim = latent_dim * nlags
-    
-    C = Cd[:,:-1]
+
+    C = Cd[:, :-1]
     C_ = jnp.zeros((obs_dim, lds_dim))
-    C_ = C_.at[:,-latent_dim:].set(C)
-    d_ = Cd[:,-1]
-    
-    R_ = R[nlags-1:]
-    y_ = y[nlags-1:]
-    
-    C0 = jnp.zeros((obs_dim*(nlags-1),lds_dim))
-    for l in range(nlags-1):
-        C0 = C0.at[l*obs_dim:(l+1)*obs_dim, l*latent_dim:(l+1)*latent_dim].set(C)
-    d0 = jnp.tile(d_, (nlags-1,))
-    D0 = jnp.zeros((obs_dim*(nlags-1),2))
-    u0 = jnp.zeros(2,)
-    R0 = jnp.diag(R[:nlags-1,:].reshape(-1))
-    y0 = y[:nlags-1,:].reshape(-1)
-    m0_,S0_ = _condition_on(m0,S0,C0,D0,d0,R0,u0,y0)
+    C_ = C_.at[:, -latent_dim:].set(C)
+    d_ = Cd[:, -1]
+
+    R_ = R[nlags - 1 :]
+    y_ = y[nlags - 1 :]
+
+    C0 = jnp.zeros((obs_dim * (nlags - 1), lds_dim))
+    for l in range(nlags - 1):
+        C0 = C0.at[
+            l * obs_dim : (l + 1) * obs_dim, l * latent_dim : (l + 1) * latent_dim
+        ].set(C)
+    d0 = jnp.tile(d_, (nlags - 1,))
+    D0 = jnp.zeros((obs_dim * (nlags - 1), 2))
+    u0 = jnp.zeros(
+        2,
+    )
+    R0 = jnp.diag(R[: nlags - 1, :].reshape(-1))
+    y0 = y[: nlags - 1, :].reshape(-1)
+    m0_, S0_ = _condition_on(m0, S0, C0, D0, d0, R0, u0, y0)
 
     return C_, d_, R_, y_, m0_, S0_
 
-            
-        
+
 def ar_to_lds_dynamics(Ab, Q):
     """
-    Given a linear dynamical system with L'th-order autoregressive 
-    dynamics in R^D, returns the dynamics terms for a system with 
-    1st-order dynamics in R^(D*L)
-    
-=======
     Given a linear dynamical system with L'th-order autoregressive
-    dynamics in R^D, returns a system with 1st-order dynamics in R^(D*L)
+    dynamics in R^D, returns the dynamics terms for a system with
+    1st-order dynamics in R^(D*L)
 
->>>>>>> dev
     Parameters
     ----------
     Ab: jax array, shape (..., D, D*L + 1)
         AR affine transform
     Q: jax array, shape (..., D, D)
         AR noise covariance
-<<<<<<< HEAD
-=======
-    Cd: jax array, shape (..., D_obs, D+1)
-        Observation affine transformation
->>>>>>> dev
 
     Returns
     -------
     A_: jax array, shape (..., D*L, D*L)
-<<<<<<< HEAD
-    b_: jax array, shape (..., D*L)    
-    Q_: jax array, shape (..., D*L, D*L)  
-    """    
-=======
     b_: jax array, shape (..., D*L)
     Q_: jax array, shape (..., D*L, D*L)
-    C_: jax array, shape (..., D_obs, D*L)
-    d_: jax array, shape (..., D_obs)
     """
->>>>>>> dev
     nlags = get_nlags(Ab)
     latent_dim = Ab.shape[-2]
     lds_dim = latent_dim * nlags
@@ -297,19 +216,5 @@ def ar_to_lds_dynamics(Ab, Q):
     Q_ = jnp.zeros((*dims, lds_dim, lds_dim))
     Q_ = Q_.at[..., :-latent_dim, :-latent_dim].set(eye * 1e-2)
     Q_ = Q_.at[..., -latent_dim:, -latent_dim:].set(Q)
-<<<<<<< HEAD
-    
+
     return A_, b_, Q_
-=======
-
-    if Cd is None:
-        return A_, b_, Q_
-
-    C = Cd[..., :-1]
-    C_ = jnp.zeros((*C.shape[:-1], lds_dim))
-    C_ = C_.at[..., -latent_dim:].set(C)
-
-    d_ = Cd[..., -1]
-
-    return A_, b_, Q_, C_, d_
->>>>>>> dev

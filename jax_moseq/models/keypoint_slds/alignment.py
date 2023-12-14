@@ -375,11 +375,7 @@ def preprocess_for_pca(
         if verbose:
             n = outliers.sum()
             pct = outliers.mean() * 100
-<<<<<<< HEAD
-            print(f'Interpolating {n} ({pct:.1f}%) low-confidence keypoints')
-=======
             print(f"Interpolating {n} ({pct:.1f}%) low-confidence keypoints")
->>>>>>> dev
         Y = interpolate(Y, outliers)
 
     if fix_heading:
