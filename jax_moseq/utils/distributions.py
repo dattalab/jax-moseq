@@ -3,8 +3,12 @@ import jax.numpy as jnp
 import jax.random as jr
 import tensorflow_probability.substrates.jax.distributions as tfd
 from dynamax.hidden_markov_model.inference import hmm_posterior_sample
+<<<<<<< HEAD
 from jax_moseq.utils import nan_check, convert_data_precision
 from functools import partial
+=======
+from jax_moseq.utils import convert_data_precision
+>>>>>>> dev
 
 na = jnp.newaxis
 
@@ -42,13 +46,22 @@ def sample_mn(seed, M, U, V):
     return M + G
 
 
+<<<<<<< HEAD
 @nan_check
+=======
+>>>>>>> dev
 def sample_invwishart(seed, S, nu):
     n = S.shape[0]
 
     chi2_seed, norm_seed = jr.split(seed)
     x = jnp.diag(jnp.sqrt(sample_chi2(chi2_seed, nu - jnp.arange(n))))
+<<<<<<< HEAD
     x = x.at[jnp.triu_indices_from(x, 1)].set(jr.normal(norm_seed, (n * (n - 1) // 2,)))
+=======
+    x = x.at[jnp.triu_indices_from(x, 1)].set(
+        jr.normal(norm_seed, (n * (n - 1) // 2,))
+    )
+>>>>>>> dev
     R = jnp.linalg.qr(x, "r")
 
     chol = jnp.linalg.cholesky(S)
@@ -56,14 +69,16 @@ def sample_invwishart(seed, S, nu):
     T = jax.scipy.linalg.solve_triangular(R.T, chol.T, lower=True).T
     return jnp.dot(T, T.T)
 
+<<<<<<< HEAD
 
 def sample_niw(seed, mu, lam, nu, S):
     sigma = sample_invwishart(seed, S, nu)
     mu = jr.multivariate_normal(seed, mu, sigma / lam)
     return mu, sigma
 
+=======
+>>>>>>> dev
 
-@nan_check
 def sample_mniw(seed, nu, S, M, K):
     sigma = sample_invwishart(seed, S, nu)
     A = sample_mn(seed, M, sigma, K)
