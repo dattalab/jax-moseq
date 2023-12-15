@@ -6,9 +6,8 @@ import numpy as np
 na = jnp.newaxis
 
 from jax_moseq.utils import pad_affine
+from jax_moseq.utils.autoregression import timescale_weights_covs
 
-
-#TODO: NEED TO UPDATE FOR TWARHMM
 def steady_state_distribution(pi, pseudocount=1e-3):
     """
     Compute the steady state distribution of a Markov chain.
@@ -36,7 +35,7 @@ def steady_state_distribution(pi, pseudocount=1e-3):
     return jnp.array(steady_state)
 
 
-def generate_initial_state(seed, pi, Ab, Q):
+def generate_initial_state(seed, pi_z, pi_t, Ab, Q, possible_taus):
     """
     Generate initial states for the ARHMM.
 
@@ -64,21 +63,29 @@ def generate_initial_state(seed, pi, Ab, Q):
     seed : jax.random.PRNGKey
         Updated random seed.
     """
+    num_taus = len(possible_taus)
+    num_states = Ab.shape[0]
+
     # sample initial discrete state
-    pi0 = steady_state_distribution(pi)
-    z = jr.choice(seed, jnp.arange(pi0.shape[0]), p=pi0)
+    pi0 = steady_state_distribution(jnp.kron(pi_z, pi_t))
+    states = jr.choice(seed, jnp.arange(pi0.shape[0]), p=pi0)
+    z = states//num_taus
+    t = jnp.mod(states, num_taus)
+
+    # get timescaled weights and covs
+    timescaled_weights, timescaled_covs = timescale_weights_covs(Ab, Q, possible_taus)
 
     # sample initial latent trajectory
-    latent_dim = Ab.shape[1]
-    nlags = (Ab.shape[2]-1) // latent_dim
+    latent_dim = timescaled_weights.shape[1]
+    nlags = (timescaled_weights.shape[2]-1) // latent_dim
     xlags = jr.normal(seed, (nlags, latent_dim))
 
     # update the seed
     seed = jr.split(seed)[1]
-    return z, xlags, seed
+    return z, t, xlags, seed
 
 
-def generate_next_state(seed, z, xlags, Ab, Q, pi):
+def generate_next_state(seed, z, t, xlags, Ab, Q, pi_z, pi_t):
     """
     Generate the next states of an ARHMM.
 
@@ -106,17 +113,25 @@ def generate_next_state(seed, z, xlags, Ab, Q, pi):
         the next continuous state.
     """
     # sample the next state
-    z = jr.choice(seed, jnp.arange(pi.shape[0]), p=pi[z])
+    z = jr.choice(seed, jnp.arange(pi_z.shape[0]), p=pi_z[z])
+    t = jr.choice(seed, jnp.arange(pi_t.shape[0]), p=pi_t[t])
+
+    if Ab.shape[1] == Ab.shape[2]:
+        timescaled_weight = jnp.eye(Ab.shape[1]) + Ab[z] / t
+    else:
+        timescaled_weight = jnp.hstack(
+        (jnp.eye(Ab.shape[1]), jnp.zeros((Ab.shape[1], 1)))) + Ab[z] / t
 
     # sample the next latent trajectory
-    mu = jnp.dot(Ab[z], pad_affine(xlags.flatten()))
-    x = jr.multivariate_normal(seed, mu, Q[z])
+    mu = jnp.dot(timescaled_weight, pad_affine(xlags.flatten()))
+    x = jr.multivariate_normal(seed, mu, Q[z] / t)
     xlags = jnp.concatenate([xlags[1:], x[na]], axis=0)
 
     # update the seed
     seed = jr.split(seed)[1]
-    return z, xlags, seed
+    return z, t, xlags, seed
 
+#TODO: not yet updated for TWARHMM
 def generate_next_state_fast(seed, z, xlags, Ab, L, pi, sigma):
     """
     Generate the next states of an ARHMM, using cholesky
@@ -162,7 +177,7 @@ def generate_next_state_fast(seed, z, xlags, Ab, L, pi, sigma):
 
 
 
-def generate_states(seed, pi, Ab, Q, n_steps, init_state=None):
+def generate_states(seed, pi_z, pi_t, Ab, Q, possible_taus, n_steps, init_state=None):
     """
     Generate a sequence of states from an ARHMM.
 
@@ -190,20 +205,22 @@ def generate_states(seed, pi, Ab, Q, n_steps, init_state=None):
     """
     # initialize the states
     if init_state is None:
-        z, xlags, seed = generate_initial_state(seed, pi, Ab, Q)
+        z, t, xlags, seed = generate_initial_state(seed, pi_z, pi_t, Ab, Q, possible_taus)
     else: 
-        z, xlags = init_state
+        z, t, xlags = init_state
         
     # precompute cholesky factors and random samples
-    L = cho_factor(Q, lower=True)[0]
-    sigmas = jr.normal(seed, (n_steps, Q.shape[-1]))
-    
-    # generate the states using jax.lax.scan
-    def _generate_next_state(carry, sigma):
-        z, xlags, seed = carry
-        z, xlags, seed = generate_next_state_fast(seed, z, xlags, Ab, L, pi, sigma)
-        return (z, xlags, seed), (z, xlags)
-    carry = (z, xlags, seed)
-    _, (zs, xs) = jax.lax.scan(_generate_next_state, carry, sigmas)
+    # L = cho_factor(Q, lower=True)[0]
+    # sigmas = jr.normal(seed, (n_steps, Q.shape[-1]))
 
-    return zs, xs[:,-1]
+    #TODO: change to generate_next_state_fast
+
+    # generate the states using jax.lax.scan
+    def _generate_next_state(carry):
+        z, t, xlags, seed = carry
+        z, t, xlags, seed = generate_next_state(seed, z, t, xlags, Ab, Q, pi_z, pi_t)
+        return (z, t, xlags, seed), (z, t, xlags)
+    carry = (z, t, xlags, seed)
+    _, (zs, ts, xs) = jax.lax.scan(_generate_next_state, carry)
+
+    return zs, ts, xs[:,-1]

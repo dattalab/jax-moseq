@@ -339,7 +339,7 @@ def init_hdp_transitions(seed, num_states, alpha, kappa, gamma, **kwargs):
     return betas, pi
 
 
-def init_hdp_transitions_twarhmm(seed, num_discrete_states, num_taus, alpha, kappa, gamma, tau_stay, **kwargs):
+def init_hdp_transitions_twarhmm(seed, num_states, num_taus, alpha, kappa, gamma, tau_stay, **kwargs):
     """
     Initialize the transition parameters of the HDP-HMM. For use in WARHMM code.
 
@@ -370,8 +370,8 @@ def init_hdp_transitions_twarhmm(seed, num_discrete_states, num_taus, alpha, kap
         Initial transition probabilities.
     """
     seeds = jr.split(seed)
-    betas_init = jr.dirichlet(seeds[0], jnp.full(num_discrete_states, gamma / num_discrete_states))
-    pseudo_counts = jnp.zeros((num_discrete_states, num_discrete_states))
+    betas_init = jr.dirichlet(seeds[0], jnp.full(num_states, gamma / num_states))
+    pseudo_counts = jnp.zeros((num_states, num_states))
     betas_z, pi_z = sample_hdp_transitions(seeds[1], pseudo_counts, betas_init,
                                        alpha, kappa, gamma)
 

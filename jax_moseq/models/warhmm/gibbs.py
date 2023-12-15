@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+from jax import jit
 
 from jax_moseq.utils import (
     pad_affine, 
@@ -16,7 +17,8 @@ from jax_moseq.utils.distributions import (
 from jax_moseq.utils.autoregression import (
     get_lags,
     get_nlags,
-    ar_log_likelihood
+    ar_log_likelihood,
+    timescale_weights_covs
 )
 from jax_moseq.utils.transitions import resample_hdp_transitions
 
@@ -61,15 +63,7 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi_z, pi_t, possible_taus,
     num_taus = len(possible_taus)
 
     # get timescaled weights and covs
-    tiled_weights = jnp.repeat(Ab, num_taus, axis=0)
-    tiled_taus = jnp.tile(possible_taus, num_states)
-    if Ab.shape[1] == Ab.shape[2]:
-        timescaled_weights = jnp.eye(Ab.shape[1]) + tiled_weights / tiled_taus[:, None, None]
-    else:
-        timescaled_weights = jnp.hstack(
-            (jnp.eye(Ab.shape[1]), jnp.zeros((Ab.shape[1], 1)))) + tiled_weights / tiled_taus[:, None, None]
-    tiled_covs = jnp.repeat(Q, num_taus, axis=0)
-    timescaled_covs = tiled_covs / tiled_taus[:, None, None]
+    timescaled_weights, timescaled_covs = timescale_weights_covs(Ab, Q, possible_taus)
 
     log_likelihoods = jax.lax.map(partial(ar_log_likelihood, x), (timescaled_weights, timescaled_covs))
     _, samples = jax.vmap(sample_hmm_stateseq, in_axes=(0,na,0,0))(
@@ -85,8 +79,8 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi_z, pi_t, possible_taus,
 
 #TODO: how to incorporate masking?
 @nan_check
-@jax.jit
-def M_step(x, mask, z, t, num_states, possible_taus, covariance_reg=1e-4, nlags=1):
+#@partial(jit, static_argnums=[4,5,6,7])
+def M_step(x, mask, z, t, num_states, possible_taus, nlags, covariance_reg=1e-4):
     """
         Returns mode for the continuous observation parameters ``Ab`` and ``Q``.
 
@@ -112,16 +106,18 @@ def M_step(x, mask, z, t, num_states, possible_taus, covariance_reg=1e-4, nlags=
         """
 
     # compute expected suff stats for single trial
+    #@partial(jit, static_argnums=[3,4])
     def _compute_expected_suff_stats(x, z, t):
         # shapes + initializations
-        Dx = x.shape[1]
+        Dx = x.shape[1] # this might cause issues
         # D = nlags * Dx  # check this
         #(z_trans, t_trans) = transitions
-        L = len(possible_taus)
+        #L = len(possible_taus)
         K = num_states
 
         phis = []
         # TODO: there has to be a better way to compute this
+        # tracer error in jax
         for lag in range(1, nlags + 1):
             phis.append(jnp.row_stack([jnp.zeros((lag, Dx)), x[:-lag]]))
         # if fit_intercept: # for now, assume we're always fitting the intercept
@@ -134,26 +130,28 @@ def M_step(x, mask, z, t, num_states, possible_taus, covariance_reg=1e-4, nlags=
         else:
             dx = x - covariates[:, :-1]
 
-        dxn_dxn = jnp.einsum('ti,tj->tij', dx, dx),  # dxn dxn.T
-        dxn_xn = jnp.einsum('ti,tj->tij', dx, covariates),  # dxn xn-1.T
-        xn_xn = jnp.einsum('ti,tj->tij', covariates, covariates)  # xn-1 xn-1.T
+        dxn_dxn = jnp.einsum('ti,tj->tij', dx, dx)[nlags:,:,:]  # dxn dxn.T
+        dxn_xn = jnp.einsum('ti,tj->tij', dx, covariates)[nlags:,:,:]  # dxn xn-1.T
+        xn_xn = jnp.einsum('ti,tj->tij', covariates, covariates)[nlags:,:,:] # xn-1 xn-1.T
 
         # calc sufficient stats to fit observation parameters
         #TODO: better way to compute this?
-        inds_each_k = jnp.zeros(K, z.shape[0])
+        inds_each_k = jnp.zeros((K, z.shape[0]), dtype=int)
         for k in range(K):
-            inds_each_k[k] = z == k
+            inds_each_k = inds_each_k.at[k].set(z == k)
 
-        def _compute_continuous_suff_stats(inds, dxn_dxn, dxn_xn, xn_xn):
-            tau_given_k = t[inds]
-            tauinv_given_k = 1 / tau_given_k
+        def _compute_continuous_suff_stats(inds, t, dxn_dxn, dxn_xn, xn_xn):
+            tau_list = possible_taus[t]
+            tau_given_k = tau_list*inds
+            tau_inv_list = 1 / possible_taus[t]
+            tauinv_given_k = tau_inv_list*inds
 
             # sufficient stats for A
-            dxxT = jnp.sum(dxn_xn[inds], index=0)
-            xxT_tauinv = jnp.einsum('t,tij->ij', tauinv_given_k, xn_xn[inds])
+            dxxT = jnp.sum(dxn_xn*inds[:,None,None], axis=0)
+            xxT_tauinv = jnp.einsum('t,tij->ij', tauinv_given_k, xn_xn*inds[:,None,None])
 
             # sufficient stats for Q
-            dxdxT_tau = jnp.einsum('t,tij->ij', tau_given_k, dxn_dxn[inds])
+            dxdxT_tau = jnp.einsum('t,tij->ij', tau_given_k, dxn_dxn*inds[:,None,None])
 
             T = jnp.sum(inds)
 
@@ -161,8 +159,8 @@ def M_step(x, mask, z, t, num_states, possible_taus, covariance_reg=1e-4, nlags=
 
         # K leading dim
         dxxT, xxT_tauinv, dxdxT_tau, T = jax.vmap(
-            _compute_continuous_suff_stats, in_axes=(0, None, None, None))\
-            (inds_each_k, dxn_dxn, dxn_xn, xn_xn)
+            _compute_continuous_suff_stats, in_axes=(0, None, None, None, None))\
+            (inds_each_k, t, dxn_dxn, dxn_xn, xn_xn)
 
         #TODO: worry about fitting transitions at some point?
 
@@ -175,7 +173,8 @@ def M_step(x, mask, z, t, num_states, possible_taus, covariance_reg=1e-4, nlags=
 
     # Calc expected stats for each trial
     # N x K leading dims
-    dxxT, xxT_tauinv, dxdxT_tau, T = jax.vmap(_compute_expected_suff_stats)(x, z, t)
+    #_compute_expected_suff_stats_partial = partial(_compute_expected_suff_stats, num_states=num_states, nlags=nlags)
+    dxxT, xxT_tauinv, dxdxT_tau, T = jax.vmap(_compute_expected_suff_stats, in_axes=(0,0,0))(x, z, t)
 
     # Sum the expected stats over the whole dataset (over N)
     dxxT = dxxT.sum(axis=0)
@@ -185,7 +184,7 @@ def M_step(x, mask, z, t, num_states, possible_taus, covariance_reg=1e-4, nlags=
 
     # use expected stats to calculate parameters for single discrete state
     def _update_ar_params(dxxT, xxT_tauinv, dxdxT_tau, T):
-        Dx = xxT_tauinv.shape[0] #check this (should be fine since K is being vmapped out)
+        Dx = dxxT.shape[0] #check this (should be fine since K is being vmapped out)
 
         AstarT = jnp.linalg.solve(xxT_tauinv, dxxT.T)
         weights = AstarT.T  # continuous time operator (unscaled)
@@ -247,9 +246,12 @@ def resample_model(data, seed, states, params, hypparams,
 
         # args: (x, mask, z, t, num_states, possible_taus, covariance_reg=1e-4, nlags=1)
         if verbose: print('Resampling Ab,Q (AR parameters)')
+        # x, mask, z, t, num_states, possible_taus, nlags, covariance_reg=1e-4
         params['Ab'], params['Q']= M_step(
-            **data, **states, **params,
-            **hypparams['ar_hypparams'])
+            data['x'], data['mask'], states['z'], states['t'],
+            hypparams['ar_hypparams']['num_states'],
+            params['possible_taus'],
+            hypparams['ar_hypparams']['nlags'])
 
     if verbose: print('Resampling latent states')
     states['z'], states['t'] = resample_discrete_stateseqs(

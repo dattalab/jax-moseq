@@ -95,6 +95,8 @@ def init_params(seed, trans_hypparams, ar_hypparams, **kwargs):
     params = {}
     params['betas_z'], params['pi_z'], params['betas_t'], params['pi_t'] = init_hdp_transitions_twarhmm(seed, **trans_hypparams)
     params['Ab'], params['Q'] = init_ar_params(seed, **ar_hypparams)
+    #TODO: below is sloppy, figure out a better way to move possible_taus around
+    params['possible_taus'] = ar_hypparams['tau_list']
     return params
 
 
@@ -129,6 +131,8 @@ def init_hyperparams(trans_hypparams, ar_hypparams, **kwargs):
     ar_hypparams['K_0'] = K_0_scale * jnp.eye(d * nlags + 1)
     ar_hypparams['M_0'] = jnp.pad(jnp.eye(d), ((0,0),((nlags-1)*d,1)))
     ar_hypparams['num_states'] = trans_hypparams['num_states']
+    ar_hypparams['num_taus'] = trans_hypparams['num_taus']
+    ar_hypparams['tau_stay'] = trans_hypparams['tau_stay']
     ar_hypparams['nu_0'] = d + 2
     
     return {'trans_hypparams': trans_hypparams,
@@ -219,12 +223,13 @@ def init_model(data=None,
     if states is None:
         if verbose:
             print('T-WARHMM: Initializing states')
-        states, taus = init_states(seed, x, mask, params)
+        init_dict = init_states(seed, x, mask, params)
+        states = init_dict['z']
+        taus = init_dict['t']
     else:
         states = jax.device_put(states)
         taus = jax.device_put(taus)
-    model['states'] = states
-    model['taus'] = taus
+    model['states'] = {'z':states, 't':taus}
 
     return model
 
