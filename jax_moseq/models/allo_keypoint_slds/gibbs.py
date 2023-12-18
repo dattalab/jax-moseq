@@ -8,11 +8,7 @@ import time
 
 from jax_moseq.models import keypoint_slds, arhmm, allo_dynamics
 from jax_moseq.utils import convert_data_precision
-
-from jax_moseq.models.allo_dynamics import allo_log_likelihood
-
 from jax_moseq.utils.autoregression import get_nlags, ar_log_likelihood
-
 from jax_moseq.models.keypoint_slds import (
     angle_to_rotation_matrix,
     estimate_aligned,
@@ -71,7 +67,7 @@ def resample_discrete_stateseqs(
     nlags = get_nlags(Ab)
     num_samples = mask.shape[0]
 
-    ll_fun = jax.vmap(partial(allo_log_likelihood, h, v))
+    ll_fun = jax.vmap(partial(allo_dynamics.allo_log_likelihood, h, v[..., :2]))
     log_likelihoods = ll_fun(delta_h, sigmasq_h, delta_v, sigmasq_v)[..., nlags - 1 :]
     log_likelihoods += jax.lax.map(partial(ar_log_likelihood, x), (Ab, Q))
 
@@ -96,7 +92,7 @@ def resample_allocentric_dynamics_params(seed, *, mask, v, h, Ab, num_states, **
     return allo_dynamics.resample_allocentric_dynamics_params(
         seed,
         mask=mask[..., nlags - 1 :],
-        v=v[..., nlags - 1 :, :],
+        v=v[..., nlags - 1 :, :2],
         h=h[..., nlags - 1 :],
         num_states=num_states,
         **kwargs
