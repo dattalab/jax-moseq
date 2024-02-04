@@ -50,7 +50,7 @@ def check_precision(fn):
             )
             msg += ", ".join([f'"{name}"' for name in args_with_wrong_precision])
             msg += '. Either change the JAX config using `jax.config.update("jax_enable_x64", True/False)` '
-            msg += "or convert the arguments to the correct precision using `jax_moseq.utils.utils.convert_data_precision`."
+            msg += "or convert the arguments to the correct precision using `jax_moseq.utils.debugging.convert_data_precision`."
             raise ValueError(msg)
 
         return fn(*args, **kwargs)
