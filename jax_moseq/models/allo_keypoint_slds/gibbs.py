@@ -252,7 +252,8 @@ def resample_model(
     noise_prior,
     ar_only=False,
     states_only=False,
-    skip_noise=False,
+    resample_global_noise_scale=False,
+    resample_local_noise_scale=True,
     verbose=False,
     jitter=0,
     parallel_message_passing=False,
@@ -279,8 +280,10 @@ def resample_model(
         Whether to restrict sampling to ARHMM components.
     states_only : bool, default=False
         Whether to restrict sampling to states.
-    skip_noise : bool, default=False
-        Whether to exclude ``sigmasq`` and ``s`` from resampling.
+    resample_global_noise_scale : bool, default=False
+        Whether to resample the global noise scales (``sigmasq``)
+    resample_local_noise_scale : bool, default=True
+        Whether to resample the local noise scales (``s``)
     jitter : float, default=1e-3
         Amount to boost the diagonal of the covariance matrix
         during backward-sampling of the continuous states.
@@ -329,7 +332,7 @@ def resample_model(
     states["z"] = resample_discrete_stateseqs(seed, **data, **states, **params)
 
     if not ar_only:
-        if not (states_only or skip_noise):
+        if (not states_only) and resample_global_noise_scale:
             if verbose:
                 print("Resampling sigmasq (global noise scales)")
             params["sigmasq"] = keypoint_slds.resample_obs_variance(
@@ -358,7 +361,7 @@ def resample_model(
             seed, **data, **states, **params, **hypparams["allo_hypparams"]
         )
 
-        if not skip_noise:
+        if resample_local_noise_scale:
             if verbose:
                 print("Resampling s (local noise scales)")
             states["s"] = keypoint_slds.resample_scales(
