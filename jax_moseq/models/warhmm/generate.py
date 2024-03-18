@@ -85,7 +85,7 @@ def generate_initial_state(seed, pi_z, pi_t, Ab, Q, possible_taus):
     return z, t, xlags, seed
 
 
-def generate_next_state(seed, z, t, xlags, Ab, Q, pi_z, pi_t):
+def generate_next_state(seed, z, t, xlags, Ab, Q, tau_list, pi_z, pi_t):
     """
     Generate the next states of an ARHMM.
 
@@ -115,16 +115,17 @@ def generate_next_state(seed, z, t, xlags, Ab, Q, pi_z, pi_t):
     # sample the next state
     z = jr.choice(seed, jnp.arange(pi_z.shape[0]), p=pi_z[z])
     t = jr.choice(seed, jnp.arange(pi_t.shape[0]), p=pi_t[t])
+    tau = tau_list[t]
 
     if Ab.shape[1] == Ab.shape[2]:
-        timescaled_weight = jnp.eye(Ab.shape[1]) + Ab[z] / t
+        timescaled_weight = jnp.eye(Ab.shape[1]) + Ab[z] / tau
     else:
         timescaled_weight = jnp.hstack(
-        (jnp.eye(Ab.shape[1]), jnp.zeros((Ab.shape[1], 1)))) + Ab[z] / t
+        (jnp.eye(Ab.shape[1]), jnp.zeros((Ab.shape[1], 1)))) + Ab[z] / tau
 
     # sample the next latent trajectory
     mu = jnp.dot(timescaled_weight, pad_affine(xlags.flatten()))
-    x = jr.multivariate_normal(seed, mu, Q[z] / t)
+    x = jr.multivariate_normal(seed, mu, Q[z] / tau)
     xlags = jnp.concatenate([xlags[1:], x[na]], axis=0)
 
     # update the seed
@@ -218,7 +219,7 @@ def generate_states(seed, pi_z, pi_t, Ab, Q, possible_taus, n_steps, init_state=
     # generate the states using jax.lax.scan
     def _generate_next_state(carry):
         z, t, xlags, seed = carry
-        z, t, xlags, seed = generate_next_state(seed, z, t, xlags, Ab, Q, pi_z, pi_t)
+        z, t, xlags, seed = generate_next_state(seed, z, t, xlags, Ab, Q, possible_taus, pi_z, pi_t)
         return (z, t, xlags, seed), (z, t, xlags)
     carry = (z, t, xlags, seed)
     _, (zs, ts, xs) = jax.lax.scan(_generate_next_state, carry)

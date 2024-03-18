@@ -26,7 +26,7 @@ from functools import partial
 na = jnp.newaxis
 
 
-@jax.jit
+# @jax.jit
 def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi_z, pi_t, possible_taus, **kwargs):
     """
     Resamples the latent state sequences ``z`` and ``t``.
@@ -59,13 +59,16 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi_z, pi_t, possible_taus,
     """
     nlags = get_nlags(Ab)
     num_samples = mask.shape[0]
-    num_states = Ab.shape[0]
     num_taus = len(possible_taus)
 
     # get timescaled weights and covs
     timescaled_weights, timescaled_covs = timescale_weights_covs(Ab, Q, possible_taus)
+    timescaled_weights_adj = timescaled_weights #- jnp.tile((jnp.concatenate((jnp.eye(2), jnp.zeros((2, 1))), axis=1)),
+                                                           #(timescaled_weights.shape[0], 1, 1))
+    #TODO: timescaled_weights has identity added (as in paper) but when that's included the sampling breaks down...
+    # where else are A and Q used that would cause this problem?
 
-    log_likelihoods = jax.lax.map(partial(ar_log_likelihood, x), (timescaled_weights, timescaled_covs))
+    log_likelihoods = jax.lax.map(partial(ar_log_likelihood, x), (timescaled_weights_adj, timescaled_covs))
     _, samples = jax.vmap(sample_hmm_stateseq, in_axes=(0,na,0,0))(
         jr.split(seed, num_samples),
         jnp.kron(pi_z, pi_t),
@@ -73,8 +76,8 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi_z, pi_t, possible_taus,
         mask.astype(float)[:,nlags:])
 
     # split into z and t
-    t = samples // num_states
-    z = jnp.mod(samples, num_states)
+    z = samples // num_taus
+    t = jnp.mod(samples, num_taus)
     return z, t
 
 #TODO: how to incorporate masking?
@@ -108,16 +111,11 @@ def M_step(x, mask, z, t, num_states, possible_taus, nlags, covariance_reg=1e-4)
     # compute expected suff stats for single trial
     #@partial(jit, static_argnums=[3,4])
     def _compute_expected_suff_stats(x, z, t):
-        # shapes + initializations
-        Dx = x.shape[1] # this might cause issues
-        # D = nlags * Dx  # check this
-        #(z_trans, t_trans) = transitions
-        #L = len(possible_taus)
+        Dx = x.shape[1]
         K = num_states
 
         phis = []
         # TODO: there has to be a better way to compute this
-        # tracer error in jax
         for lag in range(1, nlags + 1):
             phis.append(jnp.row_stack([jnp.zeros((lag, Dx)), x[:-lag]]))
         # if fit_intercept: # for now, assume we're always fitting the intercept
@@ -134,24 +132,20 @@ def M_step(x, mask, z, t, num_states, possible_taus, nlags, covariance_reg=1e-4)
         dxn_xn = jnp.einsum('ti,tj->tij', dx, covariates)[nlags:,:,:]  # dxn xn-1.T
         xn_xn = jnp.einsum('ti,tj->tij', covariates, covariates)[nlags:,:,:] # xn-1 xn-1.T
 
-        # calc sufficient stats to fit observation parameters
-        #TODO: better way to compute this?
-        inds_each_k = jnp.zeros((K, z.shape[0]), dtype=int)
-        for k in range(K):
-            inds_each_k = inds_each_k.at[k].set(z == k)
+        def _compute_continuous_suff_stats(k, z, t, dxn_dxn, dxn_xn, xn_xn):
+            inds = jnp.where(z == k, 1, 0)
 
-        def _compute_continuous_suff_stats(inds, t, dxn_dxn, dxn_xn, xn_xn):
-            tau_list = possible_taus[t]
+            tau_list = possible_taus[t]#[nlags:]
             tau_given_k = tau_list*inds
-            tau_inv_list = 1 / possible_taus[t]
+            tau_inv_list = (1 / possible_taus[t])#[nlags:]
             tauinv_given_k = tau_inv_list*inds
 
             # sufficient stats for A
-            dxxT = jnp.sum(dxn_xn*inds[:,None,None], axis=0)
-            xxT_tauinv = jnp.einsum('t,tij->ij', tauinv_given_k, xn_xn*inds[:,None,None])
+            dxxT = jnp.einsum('t,tij->ij',inds,dxn_xn)
+            xxT_tauinv = jnp.einsum('t,t,tij->ij', tauinv_given_k, inds, xn_xn)
 
             # sufficient stats for Q
-            dxdxT_tau = jnp.einsum('t,tij->ij', tau_given_k, dxn_dxn*inds[:,None,None])
+            dxdxT_tau = jnp.einsum('t,t,tij->ij', tau_given_k, inds, dxn_dxn)
 
             T = jnp.sum(inds)
 
@@ -159,10 +153,10 @@ def M_step(x, mask, z, t, num_states, possible_taus, nlags, covariance_reg=1e-4)
 
         # K leading dim
         dxxT, xxT_tauinv, dxdxT_tau, T = jax.vmap(
-            _compute_continuous_suff_stats, in_axes=(0, None, None, None, None))\
-            (inds_each_k, t, dxn_dxn, dxn_xn, xn_xn)
+            _compute_continuous_suff_stats, in_axes=(0, None, None, None, None, None))\
+            (jnp.arange(K), z, t, dxn_dxn, dxn_xn, xn_xn)
 
-        #TODO: worry about fitting transitions at some point?
+        #TODO: implement transition fitting
 
         # if fit_transitions:
         #     fancy_e_z_over_T = np.einsum('tij->ij', fancy_e_z)
@@ -235,6 +229,10 @@ def resample_model(data, seed, states, params, hypparams,
     params = params.copy()
     states = states.copy()
 
+    if verbose: print('Resampling latent states')
+    states['z'], states['t'] = resample_discrete_stateseqs(
+        seed, **data, **states, **params)
+
     #TODO: make sure there's the correct inputs here
     if not states_only:
         # not updating transition matrix (could update z transitions in the future)
@@ -245,17 +243,13 @@ def resample_model(data, seed, states, params, hypparams,
         #     **hypparams['trans_hypparams'])
 
         # args: (x, mask, z, t, num_states, possible_taus, covariance_reg=1e-4, nlags=1)
-        if verbose: print('Resampling Ab,Q (AR parameters)')
+        if verbose: print('Updating Ab,Q (AR parameters) via M-step')
         # x, mask, z, t, num_states, possible_taus, nlags, covariance_reg=1e-4
         params['Ab'], params['Q']= M_step(
             data['x'], data['mask'], states['z'], states['t'],
             hypparams['ar_hypparams']['num_states'],
             params['possible_taus'],
             hypparams['ar_hypparams']['nlags'])
-
-    if verbose: print('Resampling latent states')
-    states['z'], states['t'] = resample_discrete_stateseqs(
-        seed, **data, **states, **params)
 
     return {'seed': seed,
             'states': states, 
