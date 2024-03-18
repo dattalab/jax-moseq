@@ -6,7 +6,7 @@ from jax_moseq.utils import device_put_as_scalar, check_precision
 from jax_moseq.utils.transitions import init_hdp_transitions_twarhmm
 from jax_moseq.utils.distributions import sample_mniw
 
-from jax_moseq.models.warhmm.gibbs import resample_discrete_stateseqs
+from jax_moseq.models.warhmm.gibbs import resample_discrete_stateseqs, M_step
 
 na = jnp.newaxis
 
@@ -129,7 +129,8 @@ def init_hyperparams(trans_hypparams, ar_hypparams, **kwargs):
 
     ar_hypparams['S_0'] = S_0_scale * jnp.eye(d)
     ar_hypparams['K_0'] = K_0_scale * jnp.eye(d * nlags + 1)
-    ar_hypparams['M_0'] = jnp.pad(jnp.eye(d), ((0,0),((nlags-1)*d,1)))
+    # ar_hypparams['M_0'] = jnp.pad(jnp.eye(d), ((0,0),((nlags-1)*d,1)))
+    ar_hypparams['M_0'] = jnp.zeros((d, d * nlags + 1))
     ar_hypparams['num_states'] = trans_hypparams['num_states']
     ar_hypparams['num_taus'] = trans_hypparams['num_taus']
     ar_hypparams['tau_stay'] = trans_hypparams['tau_stay']
@@ -141,14 +142,12 @@ def init_hyperparams(trans_hypparams, ar_hypparams, **kwargs):
 
 def init_model(data=None,
                states=None,
-               taus=None,
+               possible_taus=None,
                params=None,
                hypparams=None,
                seed=jr.PRNGKey(0),
-               
                trans_hypparams=None,
                ar_hypparams=None,
-               
                verbose=False,
                **kwargs):
     """
@@ -212,24 +211,46 @@ def init_model(data=None,
         hypparams = device_put_as_scalar(hypparams)
     model['hypparams'] = hypparams
     
-    if params is None:
-        if verbose:
-            print('T-WARHMM: Initializing parameters')
+    if states is not None and params is None:
+        assert isinstance(states, dict) and ('z' in states) and ('t' in states)
+        # Initialize randomly to get all the right keys
         params = init_params(seed, **hypparams)
-    else:
-        params = jax.device_put(params)
-    model['params'] = params
+        
+        # Do an M-step with the given staets
+        Ab, Q = M_step(data['x'], 
+                       data['mask'], 
+                       states['z'], 
+                       states['t'], 
+                       ar_hypparams['num_states'], 
+                       possible_taus, 
+                       ar_hypparams['nlags'])
+        
+        params['Ab'] = Ab
+        params['Q'] = Q
+        model['states'] = states
+        model['params'] = params
 
-    if states is None:
-        if verbose:
-            print('T-WARHMM: Initializing states')
-        init_dict = init_states(seed, x, mask, params)
-        states = init_dict['z']
-        taus = init_dict['t']
     else:
-        states = jax.device_put(states)
-        taus = jax.device_put(taus)
-    model['states'] = {'z':states, 't':taus}
+        raise Exception("Initialize somehow!")  
+    
+    # if params is None:
+    #     if verbose:
+    #         print('T-WARHMM: Initializing parameters')
+    #     params = init_params(seed, **hypparams)
+    # else:
+    #     params = jax.device_put(params)
+    # model['params'] = params
+
+    # if states is None:
+    #     if verbose:
+    #         print('T-WARHMM: Initializing states')
+    #     init_dict = init_states(seed, x, mask, params)
+    #     states = init_dict['z']
+    #     taus = init_dict['t']
+    # else:
+    #     states = jax.device_put(states)
+    #     taus = jax.device_put(taus)
+    # model['states'] = {'z':states, 't':taus}
 
     return model
 

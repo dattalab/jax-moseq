@@ -61,14 +61,11 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi_z, pi_t, possible_taus,
     num_samples = mask.shape[0]
     num_taus = len(possible_taus)
 
-    # get timescaled weights and covs
+    # get timescaled weights and covs (adds identity to Ab)
     timescaled_weights, timescaled_covs = timescale_weights_covs(Ab, Q, possible_taus)
-    timescaled_weights_adj = timescaled_weights #- jnp.tile((jnp.concatenate((jnp.eye(2), jnp.zeros((2, 1))), axis=1)),
-                                                           #(timescaled_weights.shape[0], 1, 1))
-    #TODO: timescaled_weights has identity added (as in paper) but when that's included the sampling breaks down...
-    # where else are A and Q used that would cause this problem?
+    log_likelihoods = jax.lax.map(partial(ar_log_likelihood, x), (timescaled_weights, timescaled_covs))
 
-    log_likelihoods = jax.lax.map(partial(ar_log_likelihood, x), (timescaled_weights_adj, timescaled_covs))
+    # TODO: Don't just kron the transition matrix. We can be more efficient!
     _, samples = jax.vmap(sample_hmm_stateseq, in_axes=(0,na,0,0))(
         jr.split(seed, num_samples),
         jnp.kron(pi_z, pi_t),
@@ -117,7 +114,7 @@ def M_step(x, mask, z, t, num_states, possible_taus, nlags, covariance_reg=1e-4)
         phis = []
         # TODO: there has to be a better way to compute this
         for lag in range(1, nlags + 1):
-            phis.append(jnp.row_stack([jnp.zeros((lag, Dx)), x[:-lag]]))
+            phis.append(jnp.concatenate([jnp.zeros((lag, Dx)), x[:-lag]], axis=0))
         # if fit_intercept: # for now, assume we're always fitting the intercept
         phis.append(jnp.ones(len(x)))
         covariates = jnp.column_stack(phis)
