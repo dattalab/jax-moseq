@@ -77,6 +77,7 @@ def init_model(
     model["seed"] = seed
 
     if hypparams is None:
+        allo_hypparams["num_states"] = trans_hypparams["num_states"]
         hypparams = {
             "allo_hypparams": allo_hypparams,
             "trans_hypparams": trans_hypparams,

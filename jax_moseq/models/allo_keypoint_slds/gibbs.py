@@ -333,7 +333,7 @@ def resample_model(
     states["z"] = resample_discrete_stateseqs(seed, **data, **states, **params)
 
     if not ar_only:
-        if not (states_only or skip_noise):
+        if (not states_only) and resample_global_noise_scale:
             if verbose:
                 print("Resampling sigmasq (global noise scales)")
             params["sigmasq"] = keypoint_slds.resample_obs_variance(
@@ -370,7 +370,7 @@ def resample_model(
                 seed, **data, **states, **params, **hypparams["allo_hypparams"]
             )
 
-        if not skip_noise:
+        if resample_local_noise_scale:
             if verbose:
                 print("Resampling s (local noise scales)")
             states["s"] = keypoint_slds.resample_scales(
