@@ -99,13 +99,8 @@ def log_joint_likelihood(x, mask, z, pi, Ab, Q, **kwargs):
 
 def model_likelihood(data, states, params, hypparams=None, **kwargs):
     """
-<<<<<<< HEAD
     Convenience function that invokes :py:func:`jax_moseq.models.arhmm.log_prob.log_joint_likelihood`.
-    
-=======
-    Convenience class that invokes :py:func:`jax_moseq.models.arhmm.log_prob.log_joint_likelihood`.
 
->>>>>>> dev
     Parameters
     ----------
     data : dict
