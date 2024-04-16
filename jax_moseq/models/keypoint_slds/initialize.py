@@ -454,10 +454,10 @@ def _check_init_args(
         )
 
     if data:
-        if trans_hypparams:
-            latent_dim = trans_hypparams["latent_dim"]
+        if ar_hypparams:
+            latent_dim = ar_hypparams["latent_dim"]
         else:
-            latent_dim = hypparams["trans_hypparams"]["latent_dim"]
+            latent_dim = hypparams["ar_hypparams"]["latent_dim"]
         max_dim = (data["Y"].shape[-2] - 1) * data["Y"].shape[-1]
         if latent_dim > max_dim:
             raise ValueError(
