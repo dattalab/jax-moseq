@@ -21,7 +21,7 @@ def init_states(
     v=None,
     h=None,
     fix_heading=False,
-    **kwargs
+    **kwargs,
 ):
     """
     Initialize the latent states of the keypoint SLDS from the data,
@@ -163,7 +163,7 @@ def init_model(
     verbose=False,
     exclude_outliers_for_pca=True,
     fix_heading=False,
-    **kwargs
+    **kwargs,
 ):
     """
     Initialize a keypoint SLDS model dict containing the
@@ -452,3 +452,15 @@ def _check_init_args(
             "If `states` and `params` not provided, must "
             "provide `anterior_idxs` and `posterior_idxs`."
         )
+
+    if data:
+        if trans_hypparams:
+            latent_dim = trans_hypparams["latent_dim"]
+        else:
+            latent_dim = hypparams["trans_hypparams"]["latent_dim"]
+        max_dim = (data["Y"].shape[-2] - 1) * data["Y"].shape[-1]
+        if latent_dim > max_dim:
+            raise ValueError(
+                "`latent_dim` must be less than or equal to `(num_keypoints - 1) * keypoint_dim`. "
+                f"The current value of `latent_dim` ({latent_dim}) is above the maximum ({max_dim})"
+            )
