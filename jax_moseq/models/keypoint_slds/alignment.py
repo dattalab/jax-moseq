@@ -381,7 +381,7 @@ def preprocess_for_pca(
         Y = interpolate(Y, outliers)
 
     if fix_heading:
-        v = Y.mean(-2).at[..., 2:].set(0)
+        v = Y.mean(-2)
         h = jnp.zeros(Y.shape[:-2])
         Y_aligned = Y - v[..., na, :]
     else:
@@ -425,7 +425,7 @@ def align_egocentric(Y, anterior_idxs, posterior_idxs, **kwargs):
     posterior_loc = Y[..., posterior_idxs, :2].mean(-2)
     anterior_loc = Y[..., anterior_idxs, :2].mean(-2)
     h = vector_to_angle(anterior_loc - posterior_loc)
-    v = Y.mean(-2).at[..., 2:].set(0)
+    v = Y.mean(-2)
     Y_aligned = inverse_rigid_transform(Y, v, h)
     return Y_aligned, v, h
 
