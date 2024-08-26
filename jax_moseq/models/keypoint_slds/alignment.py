@@ -269,6 +269,7 @@ def fit_pca(
     PCA_fitting_num_frames=1000000,
     exclude_outliers_for_pca=False,
     fix_heading=False,
+    return_pcs=False,
     **kwargs,
 ):
     """
@@ -301,6 +302,8 @@ def fit_pca(
     fix_heading : bool, default=False
         Whether keep the heading angle fixed. If true, the
         heading ``h`` is set to 0 and keypoints are not rotated.
+    return_pcs : bool, default=False
+        Whether to return the principal components.
     **kwargs : dict
         Overflow, for convenience.
 
@@ -308,6 +311,8 @@ def fit_pca(
     -------
     pca, sklearn.decomposition._pca.PCA
         PCA object fit to observations.
+    pcs : jax array of shape (..., (k - 1) * d)
+        Principal components. Only returned if ``return_pcs=True``.
     """
     Y_flat = preprocess_for_pca(
         Y,
@@ -329,7 +334,7 @@ def fit_pca(
         "`exclude_outliers_for_pca=False` 'or decrease `conf_threshold`."
     )
 
-    return utils.fit_pca(Y_flat, pca_mask, PCA_fitting_num_frames, verbose)
+    return utils.fit_pca(Y_flat, pca_mask, PCA_fitting_num_frames, verbose, return_pcs)
 
 
 def preprocess_for_pca(

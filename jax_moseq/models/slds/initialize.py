@@ -114,9 +114,7 @@ def init_states(seed, Y, mask, params, obs_hypparams, **kwargs):
     return states
 
 
-def init_params(
-    seed, pca, Y, mask, trans_hypparams, ar_hypparams, whiten, **kwargs
-):
+def init_params(seed, pca, Y, mask, trans_hypparams, ar_hypparams, whiten, **kwargs):
     """
     Initialize the parameters of the SLDS from the
     data and hyperparameters.
@@ -268,9 +266,7 @@ def init_model(
     if hypparams is None:
         if verbose:
             print("SLDS: Initializing hyperparameters")
-        hypparams = init_hyperparams(
-            trans_hypparams, ar_hypparams, obs_hypparams
-        )
+        hypparams = init_hyperparams(trans_hypparams, ar_hypparams, obs_hypparams)
     else:
         hypparams = device_put_as_scalar(hypparams)
     model["hypparams"] = hypparams
@@ -335,9 +331,7 @@ def _check_init_args(
         is insufficient for model initialization.
     """
     if not (data or (states and params)):
-        raise ValueError(
-            "Must provide either `data` or " "both `states` and `params`."
-        )
+        raise ValueError("Must provide either `data` or " "both `states` and `params`.")
 
     if not (hypparams or (trans_hypparams and ar_hypparams and obs_hypparams)):
         raise ValueError(

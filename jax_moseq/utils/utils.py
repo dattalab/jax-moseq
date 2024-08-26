@@ -209,14 +209,16 @@ def pad_affine(x):
     return xpadded
 
 
-def fit_pca(Y, mask, PCA_fitting_num_frames=1000000, verbose=False, **kwargs):
+def fit_pca(
+    Y, mask, PCA_fitting_num_frames=1000000, verbose=False, return_pcs=False, **kwargs
+):
     """
     Fit a PCA model to transformed keypoint coordinates.
 
     Parameters
     ----------
     Y: jax array, shape (..., d)
-        Keypoint coordinates
+        Transformed keypoint coordinates
     mask: jax array
         Binary indicator for which elements of ``Y`` are valid
     PCA_fitting_num_frames: int, default=1000000
@@ -224,10 +226,15 @@ def fit_pca(Y, mask, PCA_fitting_num_frames=1000000, verbose=False, **kwargs):
         randomly if the input data exceed this size.
     verbose: bool, default=False
         Whether to print the number of sampled frames.
+    return_pcs: bool, default=False
+        Whether to return the principal components of the data
+
     Returns
     -------
     pca, sklearn.decomposition._pca.PCA
         An sklearn PCA model fit to Y
+    pcs: jax array, shape (..., d)
+        Principal components of Y. Only returned if ``return_pcs=True``
     """
     Y_flat = Y[mask > 0]
 
@@ -239,7 +246,14 @@ def fit_pca(Y, mask, PCA_fitting_num_frames=1000000, verbose=False, **kwargs):
     if verbose:
         print(f"PCA: Fitting PCA model to {N_sample} data points")
     pca = PCA().fit(Y_sample)
-    return pca
+
+    if return_pcs:
+        mean_ = jnp.array(pca.mean_)
+        components_ = jnp.array(pca.components_)
+        pcs = jnp.dot(Y - mean_, components_.T)
+        return pca, pcs
+    else:
+        return pca
 
 
 def wrap_angle(x):
