@@ -54,12 +54,12 @@ def continuous_stateseq_log_prob(x, z, t, Ab, Q, possible_taus, **kwargs):
     num_taus = len(possible_taus)
     # get timescaled weights and covs
     timescaled_weights, timescaled_covs = timescale_weights_covs(Ab, Q, possible_taus)
-    timescaled_weights_adj = timescaled_weights - jnp.tile((jnp.concatenate((jnp.eye(2), jnp.zeros((2, 1))), axis=1)),
-                                                           (timescaled_weights.shape[0], 1, 1))
+    # timescaled_weights_adj = timescaled_weights - jnp.tile((jnp.concatenate((jnp.eye(2), jnp.zeros((2, 1))), axis=1)),
+    #                                                        (timescaled_weights.shape[0], 1, 1))
 
     effective_z = z * num_taus + t
 
-    return ar_log_likelihood(x, (timescaled_weights_adj[effective_z], timescaled_covs[effective_z]))
+    return ar_log_likelihood(x, (timescaled_weights[effective_z], timescaled_covs[effective_z]))
 
 
 @jax.jit
