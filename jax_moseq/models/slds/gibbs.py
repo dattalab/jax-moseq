@@ -115,7 +115,7 @@ def resample_continuous_stateseqs(
     # ==================================================
     # 4. Apply vectorized Kalman sample to each recording
     # Shapes of time-varying parameters going into the Kalman sampler are
-    #   ys:     (n_timesteps-n_lags+1, obs_dim), corresponding to timesteps  [L-1, T)
+    #   ys:     (n_timesteps-n_lags+1, obs_dim), corresponding to timesteps  [L-1, T]
     #   mask:   (n_timesteps-n_lags+1,)
     #   zs:     (n_timesteps-n_lags,), corresponding to timesteps [L, T]
     #   Rs:     (n_timesteps-n_lags+1, obs_dim)
@@ -144,14 +144,16 @@ def resample_continuous_stateseqs(
     # =========================================================================
     # 5. Reformat sampled trajectories back into L'th order AR dynamics in R^D
     # =========================================================================
-    x = jnp.concatenate(
-        [
-            x[:, 0, : (n_lags - 1) * latent_dim].reshape(-1, n_lags - 1, latent_dim),
-            x[:, :, -latent_dim:],
-        ],
-        axis=1,
-    )
-
+    if n_lags > 1:
+        x = jnp.concatenate(
+            [
+                x[:, 0, : (n_lags - 1) * latent_dim].reshape(
+                    -1, n_lags - 1, latent_dim
+                ),
+                x[:, :, -latent_dim:],
+            ],
+            axis=1,
+        )
     return x
 
 
