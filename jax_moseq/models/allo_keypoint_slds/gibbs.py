@@ -253,6 +253,7 @@ def resample_model(
     ar_only=False,
     states_only=False,
     skip_noise=False,
+    ignore_allo_dynamics_for_location_sampling=False,
     verbose=False,
     jitter=0,
     parallel_message_passing=False,
@@ -281,6 +282,9 @@ def resample_model(
         Whether to restrict sampling to states.
     skip_noise : bool, default=False
         Whether to exclude ``sigmasq`` and ``s`` from resampling.
+    ignore_allo_dynamics_for_location_sampling : default=False
+        Whether to ignore allocentric dynamics when resampling centroid
+        and heading using
     jitter : float, default=1e-3
         Amount to boost the diagonal of the covariance matrix
         during backward-sampling of the continuous states.
@@ -354,9 +358,17 @@ def resample_model(
 
         if verbose:
             print("Resampling centroid and heading")
-        states["h"], states["v"] = resample_heading_and_centroid(
-            seed, **data, **states, **params, **hypparams["allo_hypparams"]
-        )
+        if ignore_allo_dynamics_for_location_sampling:
+            states["h"] = keypoint_slds.resample_heading(
+                seed, **data, **states, **params
+            )
+            states["v"] = keypoint_slds.resample_location(
+                seed, **data, **states, **params, **hypparams["cen_hypparams"]
+            )
+        else:
+            states["h"], states["v"] = resample_heading_and_centroid(
+                seed, **data, **states, **params, **hypparams["allo_hypparams"]
+            )
 
         if not skip_noise:
             if verbose:
