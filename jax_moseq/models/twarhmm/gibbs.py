@@ -2,14 +2,13 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 
-from dynamax.hidden_markov_model.inference import hmm_smoother
-
 from jax_moseq.utils import (
     pad_affine,
     psd_solve,
     psd_inv,
     nan_check,
     mixed_map,
+    convert_data_precision
 )
 
 from jax_moseq.utils.distributions import sample_mniw, sample_hmm_stateseq
@@ -19,10 +18,253 @@ from jax_moseq.utils.autoregression import (
     ar_log_likelihood,
     timescale_weights_covs
 )
-from jax_moseq.utils.transitions import resample_hdp_transitions
 from functools import partial
+from typing import Callable, NamedTuple, Optional, Tuple, Union
+from jax import jit, lax
+from jaxtyping import Int, Float, Array
+
+from dynamax.types import IntScalar, Scalar
 
 na = jnp.newaxis
+
+
+class HMMPosteriorFiltered(NamedTuple):
+    r"""Simple wrapper for properties of an HMM filtering posterior.
+
+    :param marginal_loglik: $p(y_{1:T} \mid \theta) = \log \sum_{z_{1:T}} p(y_{1:T}, z_{1:T} \mid \theta)$.
+    :param filtered_probs: $p(z_t, \tau_t \mid y_{1:t}, \theta)$ for $t=1,\ldots,T$
+    :param predicted_probs: $p(z_t, \tau_t \mid y_{1:t-1}, \theta)$ for $t=1,\ldots,T$
+
+    """
+    marginal_loglik: Scalar
+    filtered_probs: Float[Array, "num_timesteps num_states num_taus"]
+    predicted_probs: Float[Array, "num_timesteps num_states num_taus"]
+
+class HMMPosterior(NamedTuple):
+    r"""Simple wrapper for properties of an HMM posterior distribution.
+
+    Transition probabilities may be either 2D or 3D depending on whether the
+    transition matrix is fixed or time-varying.
+
+    :param marginal_loglik: $p(y_{1:T} \mid \theta) = \log \sum_{z_{1:T}} p(y_{1:T}, z_{1:T} \mid \theta)$.
+    :param filtered_probs: $p(z_t, \tau_t \mid y_{1:t}, \theta)$ for $t=1,\ldots,T$
+    :param predicted_probs: $p(z_t, \tau_t \mid y_{1:t-1}, \theta)$ for $t=1,\ldots,T$
+    :param smoothed_probs: $p(z_t, \tau_t \mid y_{1:T}, \theta)$ for $t=1,\ldots,T$
+    :param initial_probs: $p(z_1, \tau_1 \mid y_{1:T}, \theta)$ (also present in `smoothed_probs` but here for convenience)
+    :param trans_probs: $p(z_t, z_{t+1} \mid y_{1:T}, \theta)$ for $t=1,\ldots,T-1$. (If the transition matrix is fixed, these probabilities may be summed over $t$. See note above.)
+    """
+    marginal_loglik: Scalar
+    filtered_probs: Float[Array, "num_timesteps num_states num taus"]
+    predicted_probs: Float[Array, "num_timesteps num_states num_taus"]
+    smoothed_probs: Float[Array, "num_timesteps num_states num_taus"]
+    initial_probs: Float[Array, " num_states num_taus"]
+    trans_probs: Optional[Union[Float[Array, "num_states num_states"],
+                                Float[Array, "num_timesteps_minus_1 num_states num_states"]]] = None
+
+
+def _normalize(u: Array, axis=None, eps=1e-15):
+    """Normalizes the values within the axis in a way that they sum up to 1.
+
+    Args:
+        u: Input array to normalize.
+        axis: Axis over which to normalize.
+        eps: Minimum value threshold for numerical stability.
+
+    Returns:
+        Tuple of the normalized values, and the normalizing denominator.
+    """
+    u = jnp.where(u == 0, 0, jnp.where(u < eps, eps, u))
+    c = u.sum(axis=axis, keepdims=True)
+    c = jnp.where(c == 0, 1, c)
+    return u / c, c
+
+
+# Helper functions for the two key filtering steps
+def _condition_on(probs: Float[Array, "num_states num_taus"], 
+                  ll: Float[Array, "num_states num_taus"]
+                  ) -> Tuple[Float[Array, "num_states num_taus"], Scalar]:
+    """Condition on new emissions, given in the form of log likelihoods
+    for each discrete state, while avoiding numerical underflow.
+
+    Args:
+        probs: prior for each state and tau
+        ll: log likelihood for state and tau
+
+    Returns:
+        probs: posterior for state k and tau j
+
+    """
+    ll_max = ll.max()
+    new_probs = probs * jnp.exp(ll - ll_max)
+    new_probs, norm = _normalize(new_probs)
+    log_norm = jnp.log(norm) + ll_max
+    return new_probs, log_norm
+
+
+def _predict(probs : Float[Array, "num states num_taus"], 
+             A_z: Float[Array , "num states num states"],
+             A_tau: Float[Array , "num taus num taus"]
+             ) -> Float[Array, "num states num_taus"]:
+    r"""Predict the next state given the current state probabilities and 
+    the transition matrix.
+    """
+    # return A.T @ probs # equivalently, jnp.einsum('ij,i->j', A, probs)
+    return jnp.einsum('ij,kl,ik->jl', A_z, A_tau, probs)
+
+@partial(jit, static_argnames=["transition_fn"])
+def hmm_filter(initial_distribution: Float[Array, " num_states num_taus"],
+               transition_matrix_states: Float[Array, "num_states num_states"],
+               transition_matrix_taus: Float[Array, "num_taus num_taus"],
+               log_likelihoods: Float[Array, "num_timesteps num_states num_taus"]
+               ) -> HMMPosteriorFiltered:
+    r"""Forwards filtering for the time-warped ARHMM.
+
+    TWARHMM is essentially a factorial HMM, so we can be more efficient with the 
+    forward-backward algorithm by leveraging the fact that there are separate 
+    transition matrices for the discrete states and time constants.
+
+    Transition matrixes must be 2D arrays. 
+
+    Args:
+        initial_distribution: $p(z_1, \tau_1 \mid \theta)$
+        transition_matrix_states: $p(z_{t+1} \mid z_t, \theta)$
+        transition_matrix_taus: $p(\tau_{t+1} \mid \tau_t, \theta)$
+        log_likelihoods: $p(y_t \mid z_t, \tau_t, \theta)$ for $t=1,\ldots, T$.
+
+    Returns:
+        filtered posterior distribution
+
+    """
+    num_timesteps, num_states, num_taus = log_likelihoods.shape
+    A_z = transition_matrix_states
+    A_tau = transition_matrix_taus
+
+    def _step(carry, t):
+        """Filtering step."""
+        log_normalizer, predicted_probs = carry
+        ll = log_likelihoods[t]
+
+        filtered_probs, log_norm = _condition_on(predicted_probs, ll)
+        log_normalizer += log_norm
+        predicted_probs_next = _predict(filtered_probs, A_z, A_tau)
+
+        return (log_normalizer, predicted_probs_next), (filtered_probs, predicted_probs)
+
+    carry = (0.0, initial_distribution)
+    (log_normalizer, _), (filtered_probs, predicted_probs) = lax.scan(_step, carry, jnp.arange(num_timesteps))
+
+    post = HMMPosteriorFiltered(marginal_loglik=log_normalizer,
+                                filtered_probs=filtered_probs,
+                                predicted_probs=predicted_probs)
+    return post
+
+
+@partial(jit, static_argnames=["transition_fn"])
+def hmm_posterior_sample(key: Array,
+                         initial_distribution_states: Float[Array, "num_states"],
+                         initial_distribution_taus: Float[Array, "num_taus"],
+                         transition_matrix_states: Float[Array, "num_states num_states"],
+                         transition_matrix_taus: Float[Array, "num_taus num_taus"],
+                         log_likelihoods: Float[Array, "num_timesteps num_states num_taus"]
+                         ) -> Tuple[Scalar, Int[Array, " num_timesteps"], Int[Array, " num_timesteps"]]:
+    r"""Sample a latent sequence from the posterior.
+
+    Args:
+        rng: random number generator
+        initial_distribution: $p(z_1 \tau_1 \mid \theta)$
+        transition_matrix_states: $p(z_{t+1} \mid z_t, \theta)$
+        transition_matrix_taus: $p(\tau_{t+1} \mid \tau_t, \theta)$
+        log_likelihoods: $p(y_t \mid z_t, \tau_t, \theta)$ for $t=1,\ldots, T$.
+
+    Returns:
+        :sample of the latent states, $z_{1:T}$, and time constants, $\tau_{1:T}$.
+
+    """
+    num_timesteps, num_states, num_taus = log_likelihoods.shape
+    A_z = transition_matrix_states
+    A_tau = transition_matrix_taus
+    pi0 = initial_distribution_states[:, None] * initial_distribution_taus[None, :]
+
+    # Run the HMM filter
+    post = hmm_filter(pi0, A_z, A_tau, log_likelihoods)
+    log_normalizer, filtered_probs = post.marginal_loglik, post.filtered_probs
+
+    def _sample_state_tau(subkey, probs):
+        idx = jr.choice(subkey, a=num_states * num_taus, p=probs.ravel())
+        state = idx // num_taus
+        tau = idx % num_taus
+        return state, tau
+    
+    # Run the sampler backward in time
+    def _step(carry, args):
+        """Backward sampler step."""
+        next_state, next_tau = carry
+        subkey, filtered_probs = args
+
+        # Fold in the next state and renormalize
+        # smoothed_probs = filtered_probs * A_z[:, next_state][:, None] * A_tau[:, next_tau]
+        smoothed_probs = jnp.einsum('ik,i,k->ik', filtered_probs, A_z[:, next_state], A_tau[:, next_tau])
+        smoothed_probs /= smoothed_probs.sum()
+
+        # Sample current state
+        state, tau = _sample_state_tau(subkey, smoothed_probs)
+        return (state, tau), (state, tau)
+
+    # Run the HMM smoother
+    keys = jr.split(key, num_timesteps)
+    last_state, last_tau = _sample_state_tau(keys[-1], filtered_probs[-1]) 
+    _, (states, taus) = lax.scan(_step, 
+                                 (last_state, last_tau),
+                                 (keys[:-1], filtered_probs[:-1]),
+                                 reverse=True)
+
+    # Add the last state
+    states = jnp.concatenate([states, jnp.array([last_state])])
+    taus = jnp.concatenate([taus, jnp.array([last_tau])])
+    return log_normalizer, states, taus
+
+
+def sample_hmm_stateseq(seed, 
+                        transition_matrix_z, 
+                        transition_matrix_tau,
+                        log_likelihoods, 
+                        mask):
+    """Sample state sequences in a Markov chain.
+
+    Parameters
+    ----------
+    seed: jax.random.PRNGKey
+        Random seed
+    transition_matrix: jax array, shape (num_states, num_states)
+        Transition matrix
+    log_likelihoods: jax array, shape (num_timesteps, num_states, num_taus
+        Sequence of log likelihoods of emissions given hidden state and parameters
+    mask: jax array, shape (num_timesteps,)
+        Sequence indicating whether to use an emission (1) or not (0)
+
+    Returns
+    -------
+    log_norm: float:
+        Posterior marginal log likelihood
+    states: jax array, shape (num_timesteps,)
+        Sequence of sampled states
+    """
+
+    num_states = transition_matrix_z.shape[0]
+    num_taus = transition_matrix_tau.shape[0]
+    initial_distribution_z = jnp.ones(num_states) / num_states
+    initial_distribution_tau = jnp.ones(num_taus) / num_taus
+
+    masked_log_likelihoods = log_likelihoods * mask[:, None, None]
+    L, zs, taus = hmm_posterior_sample(seed, 
+                                       initial_distribution_z, 
+                                       initial_distribution_tau, 
+                                       transition_matrix_z, 
+                                       transition_matrix_tau,
+                                       masked_log_likelihoods)
+    zs = convert_data_precision(zs)
+    taus = convert_data_precision(taus)
+    return L, zs, taus
 
 
 @jax.jit
@@ -64,6 +306,8 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi_z, pi_t, tau_list, **kw
     timescaled_weights, timescaled_covs = timescale_weights_covs(Ab, Q, tau_list) #NOTE: I is added in here (to get x_{t+1} instead of delta_x)
     log_likelihoods = jax.lax.map(partial(ar_log_likelihood, x), (timescaled_weights, timescaled_covs))
 
+    # TODO: Assume log likelihoods is (T, K, J) for now
+
     # TODO: Don't just kron the transition matrix. We can be more efficient!
     _, samples = jax.vmap(sample_hmm_stateseq, in_axes=(0,na,0,0))(
         jr.split(seed, num_samples),
@@ -75,45 +319,6 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi_z, pi_t, tau_list, **kw
     z = samples // num_taus
     t = jnp.mod(samples, num_taus)
     return z, t
-
-
-# @jax.jit
-# def stateseq_marginals(x, mask, Ab, Q, pi, **kwargs):
-#     """
-#     Computes the marginal probability of each discrete state at each time step.
-
-#     Parameters
-#     ----------
-#     x : jax array of shape (N, T, latent_dim)
-#         Latent trajectories.
-#     mask : jax array of shape (N, T)
-#         Binary indicator for valid frames.
-#     Ab : jax array of shape (num_states, latent_dim, ar_dim)
-#         Autoregressive transforms.
-#     Q : jax array of shape (num_states, latent_dim, latent_dim)
-#         Autoregressive noise covariances.
-#     pi : jax_array of shape (num_states, num_states)
-#         Transition probabilities.
-#     **kwargs : dict
-#         Overflow, for convenience.
-
-#     Returns
-#     ------
-#     z_marginals : jax array of shape (N, T, num_states)
-#         Marginal probability of each discrete state at each time step.
-#     """
-#     nlags = get_nlags(Ab)
-#     num_states = pi.shape[0]
-
-#     initial_distribution = jnp.ones(num_states) / num_states
-#     log_likelihoods = jax.lax.map(partial(ar_log_likelihood, x), (Ab, Q))
-#     log_likelihoods = jnp.moveaxis(log_likelihoods, 0, -1)
-#     masked_log_likelihoods = log_likelihoods * mask[:, nlags:, na]
-
-#     smoother = lambda lls: hmm_smoother(initial_distribution, pi, lls).smoothed_probs
-#     z_marginals = mixed_map(smoother)(masked_log_likelihoods)
-#     return z_marginals
-
 
 @nan_check
 @partial(jax.jit, static_argnames=("num_states", "nlags"))
