@@ -4,9 +4,9 @@ Code for fitting state-space models with Gibbs sampling.
 
 ## Installation
 
-Install `jax` as described in [Keypoint MoSeq docs](https://keypoint-moseq.readthedocs.io/en/latest/), then install jax-moseq:
 ```
-pip install jax-moseq
+pip install jax-moseq # CPU
+pip install jax-moseq[cuda] # GPU (CUDA 12)
 ```
 
 # License
