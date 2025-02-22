@@ -69,7 +69,7 @@ def init_states(seed, x, mask, params, **kwargs):
     states : dict
         State values for each latent variable.
     """
-    z, t = resample_discrete_stateseqs(seed, x, mask, **params) #TODO: make sure tau_list ends up in params dict
+    z, t = resample_discrete_stateseqs(seed, x, mask, **params) #TODO: make sure tau_values ends up in params dict
     return {"z": z, "t": t}
 
 
@@ -99,9 +99,9 @@ def init_params(seed, trans_hypparams, ar_hypparams, **kwargs):
         seed, **trans_hypparams
     )
 
-    params["tau_list"] = ar_hypparams["tau_list"]
+    params["tau_values"] = ar_hypparams["tau_values"]
 
-    num_taus = ar_hypparams['tau_list'].shape[0]
+    num_taus = ar_hypparams['tau_values'].shape[0]
     if num_taus > 1:
         transitions = trans_hypparams['t_stick'] * jnp.eye(num_taus) + \
             (1-trans_hypparams['t_stick'])/2 * (jnp.diag(jnp.ones(num_taus-1), 1) + jnp.diag(jnp.ones(num_taus-1), -1))
@@ -229,7 +229,7 @@ def init_model(
     else:
         params = jax.device_put(params)
     model["params"] = params
-    model["hypparams"]["ar_hypparams"].pop("tau_list")
+    model["hypparams"]["ar_hypparams"].pop("tau_values")
 
     if states is None:
         if verbose:
