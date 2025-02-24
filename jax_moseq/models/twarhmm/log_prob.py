@@ -29,7 +29,7 @@ def discrete_stateseq_log_prob(z, pi, **kwargs):
     log_pz : jax array of shape (..., T - 1)
         Log probability of ``z``.
     """
-    return jnp.log(pi[z[..., :-1], z[..., 1:]])
+    return jnp.log(pi)[z[..., :-1], z[..., 1:]]
 
 
 def continuous_stateseq_log_prob(x, z, t, Ab, Q, **kwargs):

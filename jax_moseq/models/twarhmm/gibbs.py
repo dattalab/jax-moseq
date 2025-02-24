@@ -479,10 +479,10 @@ def resample_model(
 
     if not states_only:
         if verbose:
-            print("Resampling pi (transition matrix)")
+            print("Resampling pi_z (transition matrix)")
         params["betas"], params["pi_z"] = resample_hdp_transitions(
             seed, **data, **states, **params, **hypparams["trans_hypparams"]
-        ) #TODO: replace with fixed transitions for tau and empirical for z (?)
+        ) 
 
         if verbose:
             print("Resampling Ab,Q (AR parameters)")
