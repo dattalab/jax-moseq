@@ -54,7 +54,7 @@ def generate_next_state(key, zprev, tprev, xprev, Ab, L, pi_z, pi_t, tau_values)
         Previous time constant index.
     xprev : jax array of shape (latent_dim,)
         Previous observation (We only support nlags=1)
-    Ab : jax array of shape (num_states, latent_dim, ar_dim)
+    Ab : jax array of shape (num_states, latent_dim, latent_dim+1)
         Autoregressive transforms
     L : jax array of shape (num_states, latent_dim, latent_dim)
         Cholesky factors for autoregressive noise covariances.
@@ -92,7 +92,7 @@ def generate_next_state(key, zprev, tprev, xprev, Ab, L, pi_z, pi_t, tau_values)
     eff_Ab = Ab[z] / tau 
     eff_L = L[z] / tau
     mu = xprev + eff_Ab[:, :-1] @ xprev + eff_Ab[:, -1]
-    x = mu + eff_L[z] @ jr.normal(k3, (dim,))
+    x = mu + eff_L @ jr.normal(k3, (dim,))
     return z, t, x
 
 

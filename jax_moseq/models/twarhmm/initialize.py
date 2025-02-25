@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import jax.random as jr
 
 from jax_moseq.utils import device_put_as_scalar, check_precision
-from jax_moseq.utils.transitions import init_hdp_transitions
+from jax_moseq.utils.transitions import init_hdp_transitions, init_dir_transitions
 from jax_moseq.utils.distributions import sample_mniw
 
 from jax_moseq.models.twarhmm.gibbs import resample_discrete_stateseqs
@@ -95,9 +95,10 @@ def init_params(seed, trans_hypparams, ar_hypparams, **kwargs):
         Values for each model parameter.
     """
     params = {}
-    params["betas"], params["pi_z"] = init_hdp_transitions(
-        seed, **trans_hypparams
-    )
+    # params["betas"], params["pi_z"] = init_hdp_transitions(
+    #     seed, **trans_hypparams
+    # )
+    params["pi_z"] = init_dir_transitions(seed, **trans_hypparams)
 
     params["tau_values"] = ar_hypparams["tau_values"]
 

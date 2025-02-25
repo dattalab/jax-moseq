@@ -16,7 +16,7 @@ from jax_moseq.utils.autoregression import (
     ar_log_likelihood,
 )
 from jax_moseq.models.twarhmm.utils import timescale_weights_covs
-from jax_moseq.utils.transitions import resample_hdp_transitions
+from jax_moseq.utils.transitions import resample_hdp_transitions, resample_dir_transitions
 
 from functools import partial
 from typing import NamedTuple, Optional, Tuple, Union
@@ -480,9 +480,10 @@ def resample_model(
     if not states_only:
         if verbose:
             print("Resampling pi_z (transition matrix)")
-        params["betas"], params["pi_z"] = resample_hdp_transitions(
-            seed, **data, **states, **params, **hypparams["trans_hypparams"]
-        ) 
+        # params["betas"], params["pi_z"] = resample_hdp_transitions(
+        #     seed, **data, **states, **params, **hypparams["trans_hypparams"]
+        # ) 
+        params["pi_z"] = resample_dir_transitions(seed, **data, **states, **params, **hypparams["trans_hypparams"])
 
         if verbose:
             print("Resampling Ab,Q (AR parameters)")

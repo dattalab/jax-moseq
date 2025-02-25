@@ -406,3 +406,37 @@ def resample_dir_transitions(seed, num_states, z, mask, beta, kappa, **kwargs):
     transition_counts = count_transitions(num_states, z, mask)
     pi = sample_dir_transitions(seed, transition_counts, beta, kappa)
     return pi
+
+def init_dir_transitions(seed, num_states, beta, kappa, **kwargs):
+    """
+    Initialize the transition parameters of the HMM with sticky, Dirichlet prior.
+
+    Parameters
+    ----------
+    seed : jr.PRNGKey
+        JAX random seed.
+    num_states : int
+        Max number of HMM states.
+    beta : scalar
+        Pseudo-counts for each transition in the transition matrix.
+    kappa : scalar
+        State persistence (i.e. "stickiness") hyperparameter.
+        Extra pseudo-counts for self-transitions.
+    kwargs : dict
+        Overflow, for convenience.
+
+    Returns
+    -------
+    betas : jax array of shape (num_states,)
+        Initial state usages.
+    pi : jax_array of shape (num_states, num_states)
+        Initial transition probabilities.
+    """
+    pseudo_counts = jnp.zeros((num_states, num_states))
+    pi = sample_dir_transitions(
+        seed, pseudo_counts, beta, kappa
+    )
+
+    # pseudocount for numerical stability
+    pi = (pi + eps) / (pi + eps).sum(1)[:, None]
+    return pi
