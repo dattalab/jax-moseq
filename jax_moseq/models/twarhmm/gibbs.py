@@ -26,7 +26,7 @@ from dynamax.types import Scalar
 
 na = jnp.newaxis
 
-
+# CUSTOM IMPLEMENTATION OF HMM FILTERING AND SAMPLING, GIVEN TRANSITION MATRIX STRUCTURE
 class HMMPosteriorFiltered(NamedTuple):
     r"""Simple wrapper for properties of an HMM filtering posterior.
 
@@ -120,8 +120,8 @@ def _sample_state_tau(subkey,
     return state, tau
 
 def hmm_filter(initial_distribution: Float[Array, " num_states num_taus"],
-               transition_matrix_states: Float[Array, "num_states num_states"],
-               transition_matrix_taus: Float[Array, "num_taus num_taus"],
+               pi_z: Float[Array, "num_states num_states"],
+               pi_t: Float[Array, "num_taus num_taus"],
                log_likelihoods: Float[Array, "num_timesteps num_states num_taus"]
                ) -> HMMPosteriorFiltered:
     r"""Forwards filtering for the time-warped ARHMM.
@@ -134,8 +134,8 @@ def hmm_filter(initial_distribution: Float[Array, " num_states num_taus"],
 
     Args:
         initial_distribution: $p(z_1, \tau_1 \mid \theta)$
-        transition_matrix_states: $p(z_{t+1} \mid z_t, \theta)$
-        transition_matrix_taus: $p(\tau_{t+1} \mid \tau_t, \theta)$
+        pi_z: $p(z_{t+1} \mid z_t, \theta)$
+        pi_t: $p(\tau_{t+1} \mid \tau_t, \theta)$
         log_likelihoods: $p(y_t \mid z_t, \tau_t, \theta)$ for $t=1,\ldots, T$.
 
     Returns:
@@ -143,8 +143,8 @@ def hmm_filter(initial_distribution: Float[Array, " num_states num_taus"],
 
     """
     num_timesteps, _, _ = log_likelihoods.shape
-    A_z = transition_matrix_states
-    A_tau = transition_matrix_taus
+    A_z = pi_z
+    A_tau = pi_t
 
     def _step(carry, t):
         """Filtering step."""
@@ -168,19 +168,20 @@ def hmm_filter(initial_distribution: Float[Array, " num_states num_taus"],
 
 
 def hmm_posterior_sample(key: Array,
-                         initial_distribution_states: Float[Array, "num_states"],
-                         initial_distribution_taus: Float[Array, "num_taus"],
-                         transition_matrix_states: Float[Array, "num_states num_states"],
-                         transition_matrix_taus: Float[Array, "num_taus num_taus"],
+                         init_z: Float[Array, "num_states"],
+                         init_t: Float[Array, "num_taus"],
+                         pi_z: Float[Array, "num_states num_states"],
+                         pi_t: Float[Array, "num_taus num_taus"],
                          log_likelihoods: Float[Array, "num_timesteps num_states num_taus"]
                          ) -> Tuple[Scalar, Int[Array, " num_timesteps"], Int[Array, " num_timesteps"]]:
     r"""Sample a latent sequence from the posterior.
 
     Args:
         rng: random number generator
-        initial_distribution: $p(z_1 \tau_1 \mid \theta)$
-        transition_matrix_states: $p(z_{t+1} \mid z_t, \theta)$
-        transition_matrix_taus: $p(\tau_{t+1} \mid \tau_t, \theta)$
+        init_z: $p(z_1 \mid \theta)$
+        init_t: $p(\tau_1 \mid \theta)$
+        pi_z: $p(z_{t+1} \mid z_t, \theta)$
+        pi_t: $p(\tau_{t+1} \mid \tau_t, \theta)$
         log_likelihoods: $p(y_t \mid z_t, \tau_t, \theta)$ for $t=1,\ldots, T$.
 
     Returns:
@@ -188,9 +189,9 @@ def hmm_posterior_sample(key: Array,
 
     """
     num_timesteps, num_states, num_taus = log_likelihoods.shape
-    A_z = transition_matrix_states
-    A_tau = transition_matrix_taus
-    pi0 = initial_distribution_states[:, None] * initial_distribution_taus[None, :]
+    A_z = pi_z
+    A_tau = pi_t
+    pi0 = init_z[:, None] * init_t[None, :]
 
     # Run the HMM filter
     post = hmm_filter(pi0, A_z, A_tau, log_likelihoods)
@@ -226,8 +227,8 @@ def hmm_posterior_sample(key: Array,
 
 
 def sample_hmm_stateseq(seed, 
-                        transition_matrix_z, 
-                        transition_matrix_tau,
+                        pi_z, 
+                        pi_t,
                         log_likelihoods, 
                         mask):
     """Sample state sequences in a Markov chain.
@@ -236,8 +237,10 @@ def sample_hmm_stateseq(seed,
     ----------
     seed: jax.random.PRNGKey
         Random seed
-    transition_matrix: jax array, shape (num_states, num_states)
-        Transition matrix
+    pi_z : jax_array of shape (num_discrete_states, num_discrete_states)
+        Transition probabilities for discrete latent states.
+    pi_t : jax array of shape (num_taus, num_taus)
+        Transition probabilities for time constants.
     log_likelihoods: jax array, shape (num_timesteps, num_states, num_taus
         Sequence of log likelihoods of emissions given hidden state and parameters
     mask: jax array, shape (num_timesteps,)
@@ -251,8 +254,8 @@ def sample_hmm_stateseq(seed,
         Sequence of sampled states
     """
 
-    num_states = transition_matrix_z.shape[0]
-    num_taus = transition_matrix_tau.shape[0]
+    num_states = pi_z.shape[0]
+    num_taus = pi_t.shape[0]
     initial_distribution_z = jnp.ones(num_states) / num_states
     initial_distribution_tau = jnp.ones(num_taus) / num_taus
 
@@ -260,8 +263,8 @@ def sample_hmm_stateseq(seed,
     L, zs, taus = hmm_posterior_sample(seed, 
                                        initial_distribution_z, 
                                        initial_distribution_tau, 
-                                       transition_matrix_z, 
-                                       transition_matrix_tau,
+                                       pi_z, 
+                                       pi_t,
                                        masked_log_likelihoods)
     zs = convert_data_precision(zs)
     taus = convert_data_precision(taus)
@@ -288,16 +291,16 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi_z, pi_t, tau_values, **
     pi_z : jax_array of shape (num_discrete_states, num_discrete_states)
         Transition probabilities for discrete latent states.
     pi_t : jax array of shape (num_taus, num_taus)
-        Transition probabilities for continuous latent states.
+        Transition probabilities for time constants.
     **kwargs : dict
         Overflow, for convenience.
 
     Returns
     ------
-    z : jax_array of shape (N, T - n_lags)
+    z : jax_array of shape (N, T - 1)
         Discrete latent state sequences.
-    t : jax_array of shape (N, T - n_lags)
-        Continuous latent state sequences.
+    t : jax_array of shape (N, T - 1)
+        Latent time constant sequences.
     """
     num_samples = mask.shape[0]
 
@@ -345,10 +348,10 @@ def resample_ar_params(
         Binary indicator for valid frames.
     x : jax array of shape (N, T, data_dim)
         Observation trajectories.
-    z : jax_array of shape (N, T - n_lags)
+    z : jax_array of shape (N, T - 1)
         Discrete latent state sequences.
-    t : jax_array of shape (N, T - n_lags)
-        Continous latent state sequences.
+    t : jax_array of shape (N, T - 1)
+        Latent time constant sequences.
     nu_0 : int
         Inverse-Wishart degrees of freedom parameter for Q.
     S_0 : jax array of shape (latent_dim, latent_dim)
@@ -426,14 +429,13 @@ def _resample_regression_params(x, dx, taus, tau_values, nu_0, S_0, M_0, K_0, ar
     S_in_in = jnp.einsum("ti,tj,t->ij", x, x, mask)
 
     K_0_inv = psd_inv(K_0)
-    K_n_inv = K_0_inv + S_in_in #same
+    K_n_inv = K_0_inv + S_in_in 
 
-    K_n = psd_inv(K_n_inv) #same
-    # M_n = psd_solve(K_n_inv.T, K_0_inv @ M_0.T + S_out_in.T).T #looks okay (but what is point of doing solve when we have K_n?)
+    K_n = psd_inv(K_n_inv) 
     M_n = (M_0 @ K_0_inv + S_out_in) @ K_n
 
-    S_n = S_0 + S_out_out + (M_0 @ K_0_inv @ M_0.T - M_n @ K_n_inv @ M_n.T) #same
-    return sample_mniw(seed, nu_0 + mask.sum(), S_n, M_n, K_n) #get posterior nu here
+    S_n = S_0 + S_out_out + (M_0 @ K_0_inv @ M_0.T - M_n @ K_n_inv @ M_n.T) 
+    return sample_mniw(seed, nu_0 + mask.sum(), S_n, M_n, K_n) 
 
 
 def resample_model(

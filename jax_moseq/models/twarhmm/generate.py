@@ -27,9 +27,9 @@ def generate_initial_state(key, init_probs_z, init_probs_t, state_dim):
     z : int
         Initial discrete state.
     t : int
-        Initial discrete state.
-    x : jax array of shape (nlags,latent_dim)
-        Initial states of the continuous state trajectory.
+        Initial time constant.
+    x : jax array of shape (latent_dim,)
+        Initial observation.
     seed : jax.random.PRNGKey
         Updated random seed.
     """
@@ -53,13 +53,13 @@ def generate_next_state(key, zprev, tprev, xprev, Ab, L, pi_z, pi_t, tau_values)
     tprev : int
         Previous time constant index.
     xprev : jax array of shape (latent_dim,)
-        Previous observation (We only support nlags=1)
+        Previous observation 
     Ab : jax array of shape (num_states, latent_dim, latent_dim+1)
         Autoregressive transforms
     L : jax array of shape (num_states, latent_dim, latent_dim)
         Cholesky factors for autoregressive noise covariances.
     pi_z : jax array of shape (num_states, num_states)
-        Transition matrix.
+        Transition matrix for discrete latents.
     pi_t : jax array of shape (num_taus, num_taus)
         Transition matrix for time constants.
     tau_list : jax array of shape (num_taus,)
@@ -72,7 +72,7 @@ def generate_next_state(key, zprev, tprev, xprev, Ab, L, pi_z, pi_t, tau_values)
     t: int
         Next time constant.
     x : jax array of shape (latent_dim)
-        Next continuous state.
+        Next observation.
     """
     num_states, dim, _ = Ab.shape
     num_taus = tau_values.shape[0]
@@ -105,22 +105,26 @@ def generate_states(seed, pi_z, pi_t, Ab, Q, tau_values, n_steps, init_state=Non
     seed : jax.random.PRNGKey
         Random seed.
     pi : jax array of shape (num_states, num_states)
-        Transition matrix.
+        Transition matrix for discrete latents.
+    pi : jax array of shape (num_taus, num_taus)
+        Transition matrix for time constants.
     Ab : jax array of shape (num_states, latent_dim, latent_dim+1)
         Autoregressive transforms.
     Q : jax array of shape (num_states, latent_dim, latent_dim)
         Autoregressive noise covariances.
     n_steps : int
         Number of steps to generate.
-    init_states : tuple of jax arrays with shapes ((,), (nlags,latent_dim)), optional
-        Initial discrete state and ``nlags`` of continuous trajectory.
+    init_states : tuple of jax arrays with shapes ((,), (latent_dim,)), optional
+        Initial discrete state and continuous trajectory.
 
     Returns
     -------
     zs : jax array of shape (n_steps,)
-        Discrete states.
+        Discrete latent states.
+    ts : jax array of shape (n_steps,)
+        Latent time constants.
     xs : jax array of shape (n_steps,latent_dim)
-        Continuous states.
+        Observations.
     """
     # initialize the states
     if init_state is None:
