@@ -106,7 +106,7 @@ def generate_states(seed, pi_z, pi_t, Ab, Q, tau_values, n_steps, init_state=Non
         Random seed.
     pi : jax array of shape (num_states, num_states)
         Transition matrix.
-    Ab : jax array of shape (num_states, latent_dim, latent_dim*nlags+1)
+    Ab : jax array of shape (num_states, latent_dim, latent_dim+1)
         Autoregressive transforms.
     Q : jax array of shape (num_states, latent_dim, latent_dim)
         Autoregressive noise covariances.

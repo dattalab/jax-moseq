@@ -12,7 +12,6 @@ from jax_moseq.utils import (
 from jax_moseq.utils.distributions import sample_mniw, sample_hmm_stateseq
 from jax_moseq.utils.autoregression import (
     get_lags,
-    get_nlags,
     ar_log_likelihood,
 )
 from jax_moseq.models.twarhmm.utils import timescale_weights_covs
@@ -300,7 +299,6 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi_z, pi_t, tau_values, **
     t : jax_array of shape (N, T - n_lags)
         Continuous latent state sequences.
     """
-    nlags = get_nlags(Ab)
     num_samples = mask.shape[0]
 
     # get timescaled weights and covs (adds identity to Ab)
@@ -316,7 +314,6 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi_z, pi_t, tau_values, **
     # Log likelihoods is (num_states, num_taus, num_samples, num_timesteps)
     # Permute to (num_samples, num_timesteps, num_states, num_taus)
     log_likelihoods = jnp.transpose(log_likelihoods, (2, 3, 0, 1))
-    print(log_likelihoods.shape)
 
     # Generate each sample using the more efficient sampler defined above
     _, states, taus = jax.vmap(sample_hmm_stateseq, in_axes=(0,na,na,0,0))(
@@ -324,14 +321,14 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi_z, pi_t, tau_values, **
         pi_z, 
         pi_t,
         log_likelihoods,
-        mask.astype(float)[:,nlags:])
+        mask.astype(float)[:,1:])
 
     return states, taus
 
 @nan_check
-@partial(jax.jit, static_argnames=("num_states", "nlags"))
+@partial(jax.jit, static_argnames=("num_states"))
 def resample_ar_params(
-    seed, *, nlags, num_states, tau_values, mask, x, z, t, nu_0, S_0, M_0, K_0, **kwargs
+    seed, *, num_states, tau_values, mask, x, z, t, nu_0, S_0, M_0, K_0, **kwargs
 ):
     """
     Resamples the AR parameters ``Ab`` and ``Q``.
@@ -340,8 +337,6 @@ def resample_ar_params(
     ----------
     seed : jr.PRNGKey
         JAX random seed.
-    nlags : int
-        Number of autoregressive lags.
     num_states : int
         Max number of HMM discrete states.
     tau_values : jax array of shape (num_taus,)
@@ -372,14 +367,12 @@ def resample_ar_params(
     Q : jax array of shape (num_states, latent_dim, latent_dim)
         Autoregressive noise covariances.
     """
-    assert nlags == 1
     seeds = jr.split(seed, num_states)
 
     #NOTE: DIFFERENT from arhmm because we use dx as the output!
     z_oh = jax.nn.one_hot(z.reshape(-1), num_states).T # one-hot encoding of z
     t = t.reshape(-1) 
     masks = mask[..., 1:].reshape(-1) * z_oh
-    # masks = mask[..., nlags:].reshape(1, -1) * jnp.eye(num_states)[:, z.reshape(-1)] #TODO: does this portion out by state? I think so but need to figure out how
     lagged_x = get_lags(x, 1)
     x_in = pad_affine(lagged_x).reshape(-1, x.shape[-1] + 1) # x
     x_out = (x[..., 1:, :] - lagged_x).reshape(-1, x.shape[-1]) # dx

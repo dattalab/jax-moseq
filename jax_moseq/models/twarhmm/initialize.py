@@ -137,12 +137,11 @@ def init_hyperparams(trans_hypparams, ar_hypparams, **kwargs):
 
     # unpack for brevity
     d = ar_hypparams["latent_dim"]
-    nlags = ar_hypparams["nlags"]
     S_0_scale = ar_hypparams["S_0_scale"]
     K_0_scale = ar_hypparams["K_0_scale"]
 
     ar_hypparams["S_0"] = S_0_scale * jnp.eye(d)
-    ar_hypparams["K_0"] = K_0_scale * jnp.eye(d * nlags + 1)
+    ar_hypparams["K_0"] = K_0_scale * jnp.eye(d + 1)
     ar_hypparams["M_0"] = jnp.zeros((d,d+1))
     ar_hypparams["num_states"] = trans_hypparams["num_states"]
     ar_hypparams["nu_0"] = d + 2
