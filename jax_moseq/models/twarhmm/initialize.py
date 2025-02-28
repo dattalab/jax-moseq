@@ -11,7 +11,7 @@ from jax_moseq.models.twarhmm.gibbs import resample_discrete_stateseqs
 na = jnp.newaxis
 
 
-def init_ar_params(seed, *, num_states, nu_0, S_0, M_0, K_0, **kwargs): #same
+def init_ar_params(seed, *, num_states, nu_0, S_0, M_0, K_0, **kwargs): 
     """
     Initialize the autoregression parameters by sampling from an
     MNIW distribution. Note below that ar_dim = latent_dim * num_lags + 1.
@@ -69,7 +69,7 @@ def init_states(seed, x, mask, params, **kwargs):
     states : dict
         State values for each latent variable.
     """
-    z, t = resample_discrete_stateseqs(seed, x, mask, **params) #TODO: make sure tau_values ends up in params dict
+    z, t = resample_discrete_stateseqs(seed, x, mask, **params) 
     return {"z": z, "t": t}
 
 
