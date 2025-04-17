@@ -40,7 +40,7 @@ def check_precision(fn):
         args_with_wrong_precision = []
         for name, arg in list(zip(arg_names, args)) + list(kwargs.items()):
             check_fn = functools.partial(_check_array_precision, x64=x64)
-            if not jax.tree_util.tree_all(jax.tree_map(check_fn, arg)):
+            if not jax.tree_util.tree_all(jax.tree_util.tree_map(check_fn, arg)):
                 args_with_wrong_precision.append(name)
 
         if len(args_with_wrong_precision) > 0:
@@ -95,7 +95,7 @@ def convert_data_precision(data, x64=None):
         elif jnp.issubdtype(x.dtype, jnp.floating):
             return x.astype(jnp.float64 if x64 else jnp.float32)
 
-    return jax.tree_map(convert, data)
+    return jax.tree_util.tree_map(convert, data)
 
 
 def check_for_nans(data):
