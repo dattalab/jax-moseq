@@ -4,6 +4,8 @@ from numba import njit, prange
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+from pickle import dumps
+from hashlib import sha256
 
 eps = jnp.finfo(jnp.float32).tiny
 from functools import partial
@@ -350,6 +352,10 @@ def init_hdp_transitions(seed, num_states, alpha, kappa, gamma, **kwargs):
 
     # pseudocount for numerical stability
     pi = (pi + eps) / (pi + eps).sum(1)[:, None]
+    betas.block_until_ready()
+    pi.block_until_ready()
+    print(f'betas hash: {sha256(dumps(betas)).hexdigest()}')
+    print(f'pi hash: {sha256(dumps(pi)).hexdigest()}')
     return betas, pi
 
 

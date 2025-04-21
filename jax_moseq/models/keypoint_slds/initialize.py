@@ -9,6 +9,8 @@ from jax_moseq.models import arhmm, slds
 from jax_moseq.models.keypoint_slds.gibbs import resample_scales
 from jax_moseq.models.keypoint_slds.alignment import preprocess_for_pca
 
+from pickle import dumps
+from hashlib import sha256
 
 def init_states(
     seed,
@@ -109,7 +111,8 @@ def init_params(
     """
     params = arhmm.init_params(seed, trans_hypparams, ar_hypparams)
     params["Cd"] = slds.init_obs_params(pca, Y_flat, mask, whiten, **ar_hypparams)
-    params["sigmasq"] = jnp.ones(k)
+    params["sigmasq"] = jnp.ones(k).block_until_ready()
+    print(f'sigmasq hash: {sha256(dumps(params["sigmasq"])).hexdigest()}')
     return params
 
 
@@ -284,6 +287,7 @@ def init_model(
     if isinstance(seed, int):
         seed = jr.PRNGKey(seed)
     model["seed"] = seed
+    print(f'init_model seed: {seed}')
 
     if hypparams is None:
         if verbose:
@@ -294,6 +298,8 @@ def init_model(
     else:
         hypparams = device_put_as_scalar(hypparams)
     model["hypparams"] = hypparams
+    sha = sha256(dumps(model['hypparams'])).hexdigest()
+    print(f'init model hypparams hash: {sha}')
 
     if noise_prior is None:
         if verbose:
@@ -305,6 +311,8 @@ def init_model(
     else:
         noise_prior = jax.device_put(noise_prior)
     model["noise_prior"] = noise_prior
+    sha = sha256(dumps(model['noise_prior'])).hexdigest()
+    print(f'init model noise_prior hash: {sha}')
 
     if params is None:
         if verbose:
@@ -317,13 +325,17 @@ def init_model(
                 pca_mask = jnp.logical_and(mask, (conf > conf_threshold).all(-1))
             pca = utils.fit_pca(Y_flat, pca_mask, PCA_fitting_num_frames, verbose)
 
+        print('Initializing Params')
         params = init_params(
             seed, pca, Y_flat, mask, **hypparams, whiten=whiten, k=Y.shape[-2]
         )
 
     else:
+        print('Using passed params')
         params = jax.device_put(params)
     model["params"] = params
+    sha = sha256(dumps(model['params'])).hexdigest()
+    print(f'init model params hash: {sha}')
 
     if states is None:
         if verbose:
@@ -344,6 +356,8 @@ def init_model(
     else:
         states = jax.device_put(states)
     model["states"] = states
+    sha = sha256(dumps(model['states'])).hexdigest()
+    print(f'init model states hash: {sha}')
 
     return model
 

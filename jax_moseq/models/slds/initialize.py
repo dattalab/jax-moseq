@@ -3,6 +3,9 @@ import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
 
+from pickle import dumps
+from hashlib import sha256
+
 from jax_moseq.utils import (
     jax_io,
     device_put_as_scalar,
@@ -41,17 +44,23 @@ def init_obs_params(pca, Y, mask, whiten, latent_dim, **kwargs):
     Cd : jax array of shape (obs_dim, latent_dim + 1)
         Observation transform.
     """
+    print(f'pca components_ hash: {sha256(dumps(pca.components_)).hexdigest()}')
+    print(f'pca mean_ hash: {sha256(dumps(pca.mean_)).hexdigest()}')
     C = jnp.array(pca.components_[:latent_dim])
     d = jnp.array(pca.mean_)
 
     if whiten:
         Y_flat = Y[mask > 0]
-        latents_flat = jax_io(pca.transform)(Y_flat)[:, :latent_dim]
+        latents_flat = jax_io(pca.transform)(Y_flat).block_until_ready()[:, :latent_dim]
         cov = jnp.cov(latents_flat.T)
+        print(f'cov hash: {sha256(dumps(cov)).hexdigest()}')
         W = jnp.linalg.cholesky(cov)
+        print(f'W hash: {sha256(dumps(W)).hexdigest()}')
         C = W.T @ C
 
     Cd = jnp.hstack([C.T, d[:, na]])
+    Cd.block_until_ready()
+    print(f'Cd hash: {sha256(dumps(Cd)).hexdigest()}')
     return Cd
 
 

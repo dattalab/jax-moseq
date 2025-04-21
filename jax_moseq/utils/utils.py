@@ -238,7 +238,7 @@ def fit_pca(Y, mask, PCA_fitting_num_frames=1000000, verbose=False, **kwargs):
 
     if verbose:
         print(f"PCA: Fitting PCA model to {N_sample} data points")
-    pca = PCA().fit(Y_sample)
+    pca = PCA(random_state=42).fit(Y_sample)
     return pca
 
 

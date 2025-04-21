@@ -378,7 +378,7 @@ def preprocess_for_pca(
             n = outliers.sum()
             pct = outliers.mean() * 100
             print(f"Interpolating {n} ({pct:.1f}%) low-confidence keypoints")
-        Y = interpolate(Y, outliers)
+        Y = interpolate(Y, outliers).block_until_ready()
 
     if fix_heading:
         v = Y.mean(-2)
@@ -393,7 +393,6 @@ def preprocess_for_pca(
     Y_embedded = Gamma_inv @ Y_aligned
     Y_flat = Y_embedded.reshape(*dims, (k - 1) * d)
     return Y_flat, v, h
-
 
 def align_egocentric(Y, anterior_idxs, posterior_idxs, **kwargs):
     """
