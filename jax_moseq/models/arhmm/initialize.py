@@ -45,10 +45,6 @@ def init_ar_params(seed, *, num_states, nu_0, S_0, M_0, K_0, **kwargs):
     seeds = jr.split(seed, num_states)
     in_axes = (0, na, na, na, na)
     Ab, Q = jax.vmap(sample_mniw, in_axes)(seeds, nu_0, S_0, M_0, K_0)
-    Ab.block_until_ready()
-    Q.block_until_ready()
-    print(f'Ab hash: {sha256(dumps(Ab)).hexdigest()}')
-    print(f'Q hash: {sha256(dumps(Q)).hexdigest()}')
     return Ab, Q
 
 
