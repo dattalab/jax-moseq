@@ -321,7 +321,6 @@ def init_model(
         )
 
     else:
-        print('Using passed params')
         params = jax.device_put(params)
     model["params"] = params
 

@@ -91,7 +91,6 @@ def stateseq_marginals(x, mask, Ab, Q, pi, **kwargs):
     num_states = pi.shape[0]
 
     initial_distribution = jnp.ones(num_states) / num_states
-    jax.debug.breakpoint()
     log_likelihoods = jax.lax.map(partial(ar_log_likelihood, x), (Ab, Q))
     log_likelihoods = jnp.moveaxis(log_likelihoods, 0, -1)
     masked_log_likelihoods = log_likelihoods * mask[:, nlags:, na]
