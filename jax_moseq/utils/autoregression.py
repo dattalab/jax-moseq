@@ -18,6 +18,7 @@ def apply_ar_params(x, Ab):
 
 def ar_log_likelihood(x, params):
     Ab, Q = params
+    jax.debug.breakpoint()
     nlags = get_nlags(Ab)
     mu = apply_ar_params(x, Ab)
     x = x[..., nlags:, :]

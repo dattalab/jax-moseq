@@ -9,9 +9,6 @@ from jax_moseq.models import arhmm, slds
 from jax_moseq.models.keypoint_slds.gibbs import resample_scales
 from jax_moseq.models.keypoint_slds.alignment import preprocess_for_pca
 
-from pickle import dumps
-from hashlib import sha256
-
 def init_states(
     seed,
     Y,

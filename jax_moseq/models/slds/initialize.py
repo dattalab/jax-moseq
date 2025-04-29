@@ -3,9 +3,6 @@ import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
 
-from pickle import dumps
-from hashlib import sha256
-
 from jax_moseq.utils import (
     jax_io,
     device_put_as_scalar,

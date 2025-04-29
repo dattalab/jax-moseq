@@ -4,8 +4,6 @@ from numba import njit, prange
 import jax
 import jax.numpy as jnp
 import jax.random as jr
-from pickle import dumps
-from hashlib import sha256
 
 eps = jnp.finfo(jnp.float32).tiny
 from functools import partial

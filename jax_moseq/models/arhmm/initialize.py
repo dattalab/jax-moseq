@@ -8,8 +8,6 @@ from jax_moseq.utils.distributions import sample_mniw
 
 from jax_moseq.models.arhmm.gibbs import resample_discrete_stateseqs
 
-from pickle import dumps
-from hashlib import sha256
 na = jnp.newaxis
 
 
