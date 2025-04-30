@@ -233,12 +233,13 @@ def fit_pca(Y, mask, PCA_fitting_num_frames=1000000, verbose=False, **kwargs):
 
     N = Y_flat.shape[0]
     N_sample = min(PCA_fitting_num_frames, N)
-    sample = np.random.choice(N, N_sample, replace=False)
+    rng = np.random.default_rng(42)
+    sample = rng.choice(N, N_sample, replace=False)
     Y_sample = np.array(Y_flat)[sample]
 
     if verbose:
         print(f"PCA: Fitting PCA model to {N_sample} data points")
-    pca = PCA().fit(Y_sample)
+    pca = PCA(random_state=42).fit(Y_sample)
     return pca
 
 
