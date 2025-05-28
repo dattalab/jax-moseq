@@ -192,7 +192,7 @@ def jax_io(fn):
 
 def device_put_as_scalar(x):
     as_scalar = lambda arr: arr.item() if arr.shape == () else arr
-    return jax.tree_map(as_scalar, jax.device_put(x))
+    return jax.tree_util.tree_map(as_scalar, jax.device_put(x))
 
 
 def apply_affine(x, Ab):
