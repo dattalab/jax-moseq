@@ -1,4 +1,10 @@
+import jax
+import jax.numpy as jnp
 import jax.random as jr
+from functools import partial
+
+from jax_moseq import utils
+from jax_moseq.utils.distributions import sample_inv_gamma
 from jax_moseq.models import keypoint_slds
 from jax_moseq.models.allo_dynamics import init_allocentric_dynamics_params
 
@@ -16,8 +22,6 @@ def init_model(
     )
 
     if allo_hypparams is not None:
-        num_states = model["hypparams"]["trans_hypparams"]["num_states"]
-        allo_hypparams["num_states"] = num_states
         model["hypparams"]["allo_hypparams"] = allo_hypparams
 
     (
