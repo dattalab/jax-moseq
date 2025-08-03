@@ -14,7 +14,6 @@ from jax_moseq.utils.kalman import (
 na = jnp.newaxis
 
 
-@partial(jax.jit, static_argnames=("parallel_message_passing",))
 def resample_continuous_stateseqs(
     seed,
     y,

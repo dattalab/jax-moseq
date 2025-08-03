@@ -2,6 +2,7 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 from jax import lax
+from functools import partial
 
 from dynamax.linear_gaussian_ssm.parallel_inference import (
     lgssm_posterior_sample as parallel_lgssm_sample,
@@ -20,6 +21,7 @@ from jax_moseq.utils.autoregression import get_nlags
 na = jnp.newaxis
 
 
+@partial(jax.jit, static_argnames=("parallel",))
 def kalman_sample(
     seed,
     ys,
