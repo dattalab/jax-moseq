@@ -180,7 +180,7 @@ def batched_kalman_sample(
         partial(kalman_sample, jitter=jitter, parallel=parallel),
         in_axes,
     )(
-        jr.split(seed, n_recordings),
+        seeds,
         y_,
         mask_,
         z,
