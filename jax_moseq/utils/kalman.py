@@ -21,7 +21,6 @@ from jax_moseq.utils.autoregression import get_nlags
 na = jnp.newaxis
 
 
-@partial(jax.jit, static_argnames=("parallel",))
 def kalman_sample(
     seed,
     ys,

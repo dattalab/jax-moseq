@@ -119,9 +119,65 @@ def resample_continuous_stateseqs(
     #   zs:     (n_timesteps-n_lags,), corresponding to timesteps [n_lags, T)
     #   Rs:     (n_timesteps-n_lags+1, obs_dim)
     # ==================================================
+    x = batched_kalman_sample(
+        jr.split(seed, n_recordings),
+        y_,
+        mask_,
+        z,
+        m0,
+        S0,
+        A_,
+        b_,
+        Q_,
+        C_,
+        d_,
+        R_,
+        masked_dynamics_params,
+        masked_obs_noise_diag,
+        jitter,
+        parallel_message_passing,
+    )
+
+    # =========================================================================
+    # 5. Reformat sampled trajectories back into L'th order AR dynamics in R^D
+    # =========================================================================
+    if n_lags > 1:
+        x = jnp.concatenate(
+            [
+                x[:, 0, : (n_lags - 1) * latent_dim].reshape(
+                    -1, n_lags - 1, latent_dim
+                ),
+                x[:, :, -latent_dim:],
+            ],
+            axis=1,
+        )
+    return x
+
+
+
+@partial(jax.jit, static_argnames=("parallel",))
+def batched_kalman_sample(
+    seeds,
+    y_,
+    mask_,
+    z,
+    m0,
+    S0,
+    A_,
+    b_,
+    Q_,
+    C_,
+    d_,
+    R_,
+    masked_dynamics_params,
+    masked_obs_noise_diag,
+    jitter,
+    parallel,
+):
+    """Wrapper that applied `mixed_map` to `kalman_sample` for batched inputs."""
     in_axes = (0, 0, 0, 0, na, na, na, na, na, na, na, 0, na, na)
     x = mixed_map(
-        partial(kalman_sample, jitter=jitter, parallel=parallel_message_passing),
+        partial(kalman_sample, jitter=jitter, parallel=parallel),
         in_axes,
     )(
         jr.split(seed, n_recordings),
@@ -139,20 +195,6 @@ def resample_continuous_stateseqs(
         masked_dynamics_params,
         masked_obs_noise_diag,
     )
-
-    # =========================================================================
-    # 5. Reformat sampled trajectories back into L'th order AR dynamics in R^D
-    # =========================================================================
-    if n_lags > 1:
-        x = jnp.concatenate(
-            [
-                x[:, 0, : (n_lags - 1) * latent_dim].reshape(
-                    -1, n_lags - 1, latent_dim
-                ),
-                x[:, :, -latent_dim:],
-            ],
-            axis=1,
-        )
     return x
 
 
