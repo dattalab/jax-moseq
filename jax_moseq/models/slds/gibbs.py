@@ -14,7 +14,6 @@ from jax_moseq.utils.kalman import (
 na = jnp.newaxis
 
 
-@partial(jax.jit, static_argnames=("parallel_message_passing",))
 def resample_continuous_stateseqs(
     seed,
     y,
@@ -76,7 +75,7 @@ def resample_continuous_stateseqs(
     masked_obs_noise = 10
 
     # =====================================================================
-    # 1. Omit the first L frames of observations and associated sequences
+    # 1. Omit the first n_lags frames of observations and associated sequences
     # =====================================================================
     y_ = y[:, n_lags - 1 :]
     mask_ = mask[:, n_lags - 1 :]
@@ -85,7 +84,7 @@ def resample_continuous_stateseqs(
     R_ = sigmasq * s[:, n_lags - 1 :]
 
     # ==========================================================================
-    # 2. Reformat L'th-order AR dynamics in R^D to 1st-order dynamics in R^{DL}
+    # 2. Reformat n_lags'th-order AR dynamics in R^D to 1st-order dynamics in R^{DL}
     # ==========================================================================
     C_, d_, R_, y_, m0_, S0_ = jax.vmap(
         ar_to_lds_emissions, in_axes=(na, 0, 0, na, na, na)
@@ -115,16 +114,12 @@ def resample_continuous_stateseqs(
     # ==================================================
     # 4. Apply vectorized Kalman sample to each recording
     # Shapes of time-varying parameters going into the Kalman sampler are
-    #   ys:     (n_timesteps-n_lags+1, obs_dim), corresponding to timesteps  [L-1, T]
+    #   ys:     (n_timesteps-n_lags+1, obs_dim), corresponding to timesteps  [nlags-1, T)
     #   mask:   (n_timesteps-n_lags+1,)
-    #   zs:     (n_timesteps-n_lags,), corresponding to timesteps [L, T]
+    #   zs:     (n_timesteps-n_lags,), corresponding to timesteps [n_lags, T)
     #   Rs:     (n_timesteps-n_lags+1, obs_dim)
     # ==================================================
-    in_axes = (0, 0, 0, 0, na, na, na, na, na, na, na, 0, na, na)
-    x = mixed_map(
-        partial(kalman_sample, jitter=jitter, parallel=parallel_message_passing),
-        in_axes,
-    )(
+    x = batched_kalman_sample(
         jr.split(seed, n_recordings),
         y_,
         mask_,
@@ -139,6 +134,8 @@ def resample_continuous_stateseqs(
         R_,
         masked_dynamics_params,
         masked_obs_noise_diag,
+        jitter,
+        parallel_message_passing,
     )
 
     # =========================================================================
@@ -154,6 +151,50 @@ def resample_continuous_stateseqs(
             ],
             axis=1,
         )
+    return x
+
+
+
+@partial(jax.jit, static_argnames=("parallel",))
+def batched_kalman_sample(
+    seeds,
+    y_,
+    mask_,
+    z,
+    m0,
+    S0,
+    A_,
+    b_,
+    Q_,
+    C_,
+    d_,
+    R_,
+    masked_dynamics_params,
+    masked_obs_noise_diag,
+    jitter,
+    parallel,
+):
+    """Wrapper that applied `mixed_map` to `kalman_sample` for batched inputs."""
+    in_axes = (0, 0, 0, 0, na, na, na, na, na, na, na, 0, na, na)
+    x = mixed_map(
+        partial(kalman_sample, jitter=jitter, parallel=parallel),
+        in_axes,
+    )(
+        seeds,
+        y_,
+        mask_,
+        z,
+        m0,
+        S0,
+        A_,
+        b_,
+        Q_,
+        C_,
+        d_,
+        R_,
+        masked_dynamics_params,
+        masked_obs_noise_diag,
+    )
     return x
 
 

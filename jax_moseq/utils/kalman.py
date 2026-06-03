@@ -2,6 +2,7 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 from jax import lax
+from functools import partial
 
 from dynamax.linear_gaussian_ssm.parallel_inference import (
     lgssm_posterior_sample as parallel_lgssm_sample,
@@ -39,17 +40,17 @@ def kalman_sample(
     parallel=True,
 ):
     """Run forward-filtering and backward-sampling to draw samples from posterior
-    of a 1st-order dynamic system with autoregressive dynamics of order `n_lags`.
+    of a 1st-order dynamic system.
 
     Parameters
     ----------
     seed: jr.PRNGKey.
     ys: jax.Array with shape (T, obs_dim)
-        Continuous observations, minus first L+1 frames.
+        Continuous observation sequence
     mask: jax.Array with shape (T,)
-        Indicator of observation validity, for timesteps [L-1, T)
-    zs: jax.Array with shape (T-n_lags,)
-        Discrete state sequence, taking integer values [1, n_states).
+        Indicator of observation validity
+    zs: jax.Array with shape (T-1,)
+        Discrete state sequence, taking integer values [0, n_states).
     mu0: jax.Array with shape (ar_dim,)
         Initial continuous state mean
     S0: jax.Array with shape (ar_dim, ar_dim)
