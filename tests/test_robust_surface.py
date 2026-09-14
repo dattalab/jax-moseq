@@ -250,3 +250,63 @@ class TestSeparateTrans:
         )["params"]
         for key in ("Ab", "Q", "nu", "pi", "betas"):
             assert jnp.array_equal(before[key], after[key]), key
+
+
+class TestInitNu:
+    """The starting degrees of freedom follow pybasicbayes' construction walk."""
+
+    def test_walk_spreads_states_around_the_start(self):
+        nu = np.asarray(robust_arhmm.init_nu(jr.PRNGKey(0), 500))
+        assert nu.shape == (500,)
+        assert (nu > 0).all()
+        # No state should sit exactly at the nominal start, and the walk
+        # against the Gamma(1, 1) prior pulls the population below it.
+        assert not np.any(nu == robust_arhmm.DEFAULT_NU)
+        assert 3.0 < nu.mean() < 4.0
+        assert nu.std() > 0.5
+
+    def test_zero_steps_keeps_the_start_value(self):
+        nu = robust_arhmm.init_nu(jr.PRNGKey(0), 4, nu_init=3.0, nu_init_steps=0)
+        assert jnp.array_equal(nu, jnp.full(4, 3.0))
+
+    def test_per_state_start_values_are_honoured(self):
+        start = jnp.array([1.0, 2.0, 3.0])
+        nu = robust_arhmm.init_nu(jr.PRNGKey(0), 3, nu_init=start, nu_init_steps=0)
+        assert jnp.array_equal(nu, start)
+
+    def test_deterministic_in_the_seed(self):
+        a = robust_arhmm.init_nu(jr.PRNGKey(3), 10)
+        b = robust_arhmm.init_nu(jr.PRNGKey(3), 10)
+        c = robust_arhmm.init_nu(jr.PRNGKey(4), 10)
+        assert jnp.array_equal(a, b)
+        assert not jnp.array_equal(a, c)
+
+    def test_model_carries_the_recipe(self, model):
+        ar = model["hypparams"]["ar_hypparams"]
+        assert ar["nu_init"] == robust_arhmm.DEFAULT_NU
+        assert ar["nu_init_steps"] == robust_arhmm.NU_MH_STEPS
+        nu = np.asarray(model["params"]["nu"])
+        assert nu.shape == (NUM_STATES,)
+        assert len(np.unique(nu)) == NUM_STATES
+
+    def test_fixed_start_is_still_available(self, data, hypparams):
+        ar = dict(hypparams["ar_hypparams"], nu_init_steps=0)
+        m = robust_arhmm.init_model(
+            data={"x": data["x"], "mask": data["mask"]},
+            seed=jr.PRNGKey(0),
+            trans_hypparams=hypparams["trans_hypparams"],
+            ar_hypparams=ar,
+        )
+        assert jnp.array_equal(
+            m["params"]["nu"], jnp.full(NUM_STATES, robust_arhmm.DEFAULT_NU)
+        )
+
+    def test_separate_trans_uses_the_same_walk(self, data, hypparams):
+        m = robust_arhmm.separate_trans.init_model(
+            data=data, seed=jr.PRNGKey(0), **hypparams
+        )
+        single = robust_arhmm.init_model(
+            data={"x": data["x"], "mask": data["mask"]},
+            seed=jr.PRNGKey(0), **hypparams
+        )
+        assert jnp.array_equal(m["params"]["nu"], single["params"]["nu"])

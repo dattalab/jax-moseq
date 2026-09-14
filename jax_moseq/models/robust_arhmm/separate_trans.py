@@ -27,12 +27,14 @@ from jax_moseq.utils.transitions import (
 )
 
 from jax_moseq.models.robust_arhmm.gibbs import (
+    NU_MH_STEPS,
     resample_ar_params,
     resample_nu,
     resample_tau,
 )
 from jax_moseq.models.robust_arhmm.initialize import (
     init_ar_params,
+    init_nu,
     init_robust_hyperparams,
     DEFAULT_NU,
 )
@@ -137,9 +139,10 @@ def init_model(
 
     ``num_groups`` defaults to one more than the largest group index present in
     the data, so a caller that labels groups ``0..G-1`` needs not supply it.
-    The starting degrees of freedom come from ``ar_hypparams["nu_init"]``,
-    named apart from the per-state ``nu`` parameter so the two cannot collide
-    when both dictionaries are expanded into one call.
+    The starting degrees of freedom come from :py:func:`init_nu`, driven by
+    ``ar_hypparams["nu_init"]`` and ``ar_hypparams["nu_init_steps"]``, named
+    apart from the per-state ``nu`` parameter so the two cannot collide when
+    both dictionaries are expanded into one call.
     """
     if not (data or states):
         raise ValueError("Must provide either `data` or `states`.")
@@ -179,8 +182,9 @@ def init_model(
             trans["alpha"], trans["kappa"], trans["gamma"],
         )
         params["Ab"], params["Q"] = init_ar_params(seed, **ar)
-        params["nu"] = jnp.full(
-            ar["num_states"], ar.get("nu_init", DEFAULT_NU)
+        params["nu"] = init_nu(
+            seed, ar["num_states"], ar.get("nu_init", DEFAULT_NU),
+            ar.get("nu_init_steps", NU_MH_STEPS),
         )
     model["params"] = params
 

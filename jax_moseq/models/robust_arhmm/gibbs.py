@@ -207,13 +207,46 @@ def _resample_regression_params(x_in, x_out, nu_0, S_0, M_0, K_0, args):
     return sample_mniw(seed, nu_0 + (weights > 0).sum(), S_n, M_n, K_n)
 
 
+@partial(jax.jit, static_argnames=("num_steps",))
+def nu_mh_walk(seed, nu, n_obs, mean_tau, mean_log_tau, num_steps=NU_MH_STEPS):
+    """Metropolis-Hastings walk on one state's degrees of freedom.
+
+    A symmetric normal proposal on ``nu`` with a Gamma prior, run for a fixed
+    number of steps. Proposals at or below ``NU_MIN`` are rejected. With
+    ``n_obs = 0`` the likelihood term vanishes and the walk targets the prior
+    alone, which is how ``pybasicbayes.RobustRegression`` draws its starting
+    ``nu`` at construction; see :py:func:`init_nu`.
+    """
+
+    def step(carry, step_seed):
+        current, lp_current = carry
+        prop_seed, accept_seed = jr.split(step_seed)
+        proposal = current + NU_PROPOSAL_STD * jr.normal(prop_seed)
+        lp_proposal = nu_log_posterior(
+            jnp.maximum(proposal, NU_MIN), n_obs, mean_tau, mean_log_tau
+        )
+        accept = jnp.logical_and(
+            proposal > NU_MIN,
+            jnp.log(jr.uniform(accept_seed)) < lp_proposal - lp_current,
+        )
+        current = jnp.where(accept, proposal, current)
+        lp_current = jnp.where(accept, lp_proposal, lp_current)
+        return (current, lp_current), None
+
+    lp_init = nu_log_posterior(nu, n_obs, mean_tau, mean_log_tau)
+    (final, _), _ = jax.lax.scan(
+        step, (nu, lp_init), jr.split(seed, num_steps)
+    )
+    return final
+
+
 @partial(jax.jit, static_argnames=("num_states", "nlags"))
 def resample_nu(seed, mask, z, tau, nu, num_states, nlags, **kwargs):
     """Resample each state's degrees of freedom by Metropolis-Hastings.
 
-    A symmetric normal proposal on ``nu`` with a Gamma prior, run for a fixed
-    number of steps per state. Proposals at or below ``NU_MIN`` are rejected.
-    States with no assigned frames keep their current value.
+    Runs :py:func:`nu_mh_walk` for every state against the sufficient
+    statistics of its sampled precisions. States with no assigned frames keep
+    their current value.
     """
     valid = mask[:, nlags:] > 0
     flat_z = z.reshape(-1)
@@ -229,36 +262,13 @@ def resample_nu(seed, mask, z, tau, nu, num_states, nlags, **kwargs):
     mean_tau = sum_tau / safe_n
     mean_log_tau = sum_log_tau / safe_n
 
-    def one_state(args):
-        state_seed, nu_k, n_k, m_tau, m_log_tau = args
-
-        def step(carry, step_seed):
-            current, lp_current = carry
-            prop_seed, accept_seed = jr.split(step_seed)
-            proposal = current + NU_PROPOSAL_STD * jr.normal(prop_seed)
-            lp_proposal = nu_log_posterior(
-                jnp.maximum(proposal, NU_MIN), n_k, m_tau, m_log_tau
-            )
-            accept = jnp.logical_and(
-                proposal > NU_MIN,
-                jnp.log(jr.uniform(accept_seed)) < lp_proposal - lp_current,
-            )
-            current = jnp.where(accept, proposal, current)
-            lp_current = jnp.where(accept, lp_proposal, lp_current)
-            return (current, lp_current), None
-
-        lp_init = nu_log_posterior(nu_k, n_k, m_tau, m_log_tau)
-        (final, _), _ = jax.lax.scan(
-            step, (nu_k, lp_init), jr.split(state_seed, NU_MH_STEPS)
-        )
-        # A state with no frames has no information about its own nu.
-        return jnp.where(n_k > 0, final, nu_k)
-
     # vmap rather than lax.map: the states are independent, and mapping them
     # sequentially would serialize num_states * NU_MH_STEPS scan steps.
-    return jax.vmap(one_state)(
-        (jr.split(seed, num_states), nu, n_obs, mean_tau, mean_log_tau)
+    final = jax.vmap(nu_mh_walk)(
+        jr.split(seed, num_states), nu, n_obs, mean_tau, mean_log_tau
     )
+    # A state with no frames has no information about its own nu.
+    return jnp.where(n_obs > 0, final, nu)
 
 
 def resample_model(
