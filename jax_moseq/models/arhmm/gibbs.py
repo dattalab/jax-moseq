@@ -2,7 +2,10 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 
-from dynamax.hidden_markov_model.inference import hmm_smoother
+from dynamax.hidden_markov_model.inference import (
+    hmm_posterior_mode,
+    hmm_smoother,
+)
 
 from jax_moseq.utils import (
     pad_affine,
@@ -12,6 +15,7 @@ from jax_moseq.utils import (
     mixed_map,
 )
 
+from jax_moseq.utils import convert_data_precision
 from jax_moseq.utils.distributions import sample_mniw, sample_hmm_stateseq
 from jax_moseq.utils.autoregression import (
     get_lags,
@@ -98,6 +102,50 @@ def stateseq_marginals(x, mask, Ab, Q, pi, **kwargs):
     smoother = lambda lls: hmm_smoother(initial_distribution, pi, lls).smoothed_probs
     z_marginals = mixed_map(smoother)(masked_log_likelihoods)
     return z_marginals
+
+
+@jax.jit
+def stateseq_mode(x, mask, Ab, Q, pi, **kwargs):
+    """Most probable state sequence at each time step.
+
+    The Viterbi counterpart of :py:func:`stateseq_marginals`: it returns the
+    single most probable state sequence rather than the per-frame posterior or a
+    draw from it. This is what moseq2-model's ``apply_model`` needs, since
+    applying a fitted model to new recordings should be deterministic -- two
+    runs over the same data must label it the same way.
+
+    Parameters
+    ----------
+    x : jax array of shape (N, T, latent_dim)
+        Latent trajectories.
+    mask : jax array of shape (N, T)
+        Binary indicator for valid frames.
+    Ab : jax array of shape (num_states, latent_dim, ar_dim)
+        Autoregressive transforms.
+    Q : jax array of shape (num_states, latent_dim, latent_dim)
+        Autoregressive noise covariances.
+    pi : jax array of shape (num_states, num_states)
+        Transition probabilities.
+    **kwargs : dict
+        Overflow, for convenience.
+
+    Returns
+    -------
+    z : jax array of shape (N, T - nlags)
+        Most probable discrete state at each time step.
+    """
+    nlags = get_nlags(Ab)
+    num_states = pi.shape[0]
+
+    initial_distribution = jnp.ones(num_states) / num_states
+    log_likelihoods = jax.lax.map(
+        partial(ar_log_likelihood, x), (Ab, Q)
+    )
+    log_likelihoods = jnp.moveaxis(log_likelihoods, 0, -1)
+    masked_log_likelihoods = log_likelihoods * mask[:, nlags:, na]
+
+    decode = lambda lls: hmm_posterior_mode(initial_distribution, pi, lls)
+    return convert_data_precision(mixed_map(decode)(masked_log_likelihoods))
 
 
 @nan_check

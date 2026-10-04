@@ -6,6 +6,7 @@ import jax.numpy as jnp
 import jax.random as jr
 
 eps = jnp.finfo(jnp.float32).tiny
+na = jnp.newaxis
 from functools import partial
 
 
@@ -406,3 +407,82 @@ def resample_dir_transitions(seed, num_states, z, mask, beta, kappa, **kwargs):
     transition_counts = count_transitions(num_states, z, mask)
     pi = sample_dir_transitions(seed, transition_counts, beta, kappa)
     return pi
+
+
+def count_transitions_by_group(num_states, num_groups, stateseqs, mask, group):
+    """Transition counts accumulated separately for each group.
+
+    Parameters
+    ----------
+    num_states : int
+        Total number of states.
+    num_groups : int
+        Total number of groups.
+    stateseqs : jax int array of shape (N, T)
+        Batch of state sequences, one per session.
+    mask : jax array of shape (N, T + num_lags)
+        Binary indicator for which elements of ``stateseqs`` are valid.
+    group : jax int array of shape (N,)
+        Group index of each session.
+
+    Returns
+    -------
+    transition_counts : jax array of shape (num_groups, num_states, num_states)
+    """
+    T = stateseqs.shape[-1]
+    m = mask[..., -T + 1 :]
+    start = stateseqs[..., :-1]
+    end = stateseqs[..., 1:]
+
+    counts = jnp.zeros((num_groups, num_states, num_states))
+    g = jnp.broadcast_to(group[:, na], start.shape)
+    return counts.at[g, start, end].add(m)
+
+
+def resample_hdp_transitions_by_group(
+    seed, z, mask, group, betas, alpha, kappa, gamma, num_groups=None, **kwargs
+):
+    """Resample one set of HDP transition parameters per group.
+
+    Each group carries its own ``betas`` and ``pi``, matching the per-group
+    deep copies that ``pyhsmm``'s separate-transition models hold. Observation
+    parameters are shared across groups; only the transition structure differs.
+
+    Parameters
+    ----------
+    betas : jax array of shape (num_groups, num_states)
+        Per-group state usages.
+
+    Returns
+    -------
+    betas : jax array of shape (num_groups, num_states)
+    pi : jax array of shape (num_groups, num_states, num_states)
+    """
+    num_groups = betas.shape[0] if num_groups is None else num_groups
+    num_states = betas.shape[-1]
+    counts = count_transitions_by_group(
+        num_states, num_groups, z, mask, group
+    )
+
+    seeds = jr.split(seed, num_groups)
+    out_betas, out_pi = [], []
+    for g in range(num_groups):
+        b, p = sample_hdp_transitions(
+            seeds[g], counts[g], betas[g], alpha, kappa, gamma
+        )
+        out_betas.append(b)
+        out_pi.append(p)
+    return jnp.stack(out_betas), jnp.stack(out_pi)
+
+
+def init_hdp_transitions_by_group(
+    seed, num_states, num_groups, alpha, kappa, gamma, **kwargs
+):
+    """Initialize independent transition parameters for each group."""
+    seeds = jr.split(seed, num_groups)
+    betas, pis = [], []
+    for g in range(num_groups):
+        b, p = init_hdp_transitions(seeds[g], num_states, alpha, kappa, gamma)
+        betas.append(b)
+        pis.append(p)
+    return jnp.stack(betas), jnp.stack(pis)
