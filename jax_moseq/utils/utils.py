@@ -124,7 +124,7 @@ def get_frequencies(stateseqs, mask=None, num_states=None, runlength=True):
         state_onsets = np.pad(np.diff(stateseq_flat).nonzero()[0] + 1, (1, 0))
         stateseq_flat = stateseq_flat[state_onsets]
 
-    counts = np.bincount(stateseq_flat, minlength=num_states)
+    counts = np.bincount(stateseq_flat, minlength=0 if num_states is None else num_states)
     frequencies = counts / counts.sum()
     return frequencies
 
