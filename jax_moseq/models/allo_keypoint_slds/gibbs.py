@@ -7,7 +7,7 @@ na = jnp.newaxis
 import time
 
 from jax_moseq.models import keypoint_slds, arhmm, allo_dynamics
-from jax_moseq.utils import convert_data_precision
+from jax_moseq.utils import convert_data_precision, mixed_map
 from jax_moseq.utils.autoregression import get_nlags, ar_log_likelihood
 from jax_moseq.models.keypoint_slds import (
     angle_to_rotation_matrix,
@@ -17,10 +17,29 @@ from jax_moseq.models.keypoint_slds import (
 
 from jax_moseq.utils.distributions import sample_hmm_stateseq
 
+from dynamax.hidden_markov_model.inference import hmm_smoother
 from dynamax.nonlinear_gaussian_ssm import (
     ParamsNLGSSM,
     extended_kalman_posterior_sample,
 )
+
+
+def _stateseq_log_likelihoods(
+    x, h, v, Ab, Q, delta_h, sigmasq_h, delta_v, sigmasq_v
+):
+    """
+    Log likelihood of each discrete state at each time step, from pose,
+    heading and centroid dynamics.
+
+    Returns
+    ------
+    log_likelihoods : jax array of shape (N, T - n_lags, num_states)
+    """
+    nlags = get_nlags(Ab)
+    ll_fun = jax.vmap(partial(allo_dynamics.allo_log_likelihood, h, v[..., :2]))
+    log_likelihoods = ll_fun(delta_h, sigmasq_h, delta_v, sigmasq_v)[..., nlags - 1 :]
+    log_likelihoods += jax.lax.map(partial(ar_log_likelihood, x), (Ab, Q))
+    return jnp.moveaxis(log_likelihoods, 0, -1)
 
 
 @jax.jit
@@ -67,17 +86,72 @@ def resample_discrete_stateseqs(
     nlags = get_nlags(Ab)
     num_samples = mask.shape[0]
 
-    ll_fun = jax.vmap(partial(allo_dynamics.allo_log_likelihood, h, v[..., :2]))
-    log_likelihoods = ll_fun(delta_h, sigmasq_h, delta_v, sigmasq_v)[..., nlags - 1 :]
-    log_likelihoods += jax.lax.map(partial(ar_log_likelihood, x), (Ab, Q))
+    log_likelihoods = _stateseq_log_likelihoods(
+        x, h, v, Ab, Q, delta_h, sigmasq_h, delta_v, sigmasq_v
+    )
 
     _, z = jax.vmap(sample_hmm_stateseq, in_axes=(0, na, 0, 0))(
         jr.split(seed, num_samples),
         pi,
-        jnp.moveaxis(log_likelihoods, 0, -1),
+        log_likelihoods,
         mask.astype(float)[:, nlags:],
     )
     return convert_data_precision(z)
+
+
+@jax.jit
+def stateseq_marginals(
+    x, h, v, mask, Ab, Q, delta_h, sigmasq_h, delta_v, sigmasq_v, pi, **kwargs
+):
+    """
+    Computes the marginal probability of each discrete state at each time
+    step, using pose, heading and centroid dynamics. These are the marginals
+    of the distribution that :py:func:`resample_discrete_stateseqs` samples
+    from.
+
+    Parameters
+    ----------
+    x : jax array of shape (N, T, latent_dim)
+        Latent trajectories.
+    h : jax array of shape (N, T)
+        Heading angles.
+    v : jax array of shape (N, T, d)
+        Centroid positions.
+    mask : jax array of shape (N, T)
+        Binary indicator for valid frames.
+    Ab : jax array of shape (num_states, latent_dim, ar_dim)
+        Autoregressive transforms.
+    Q : jax array of shape (num_states, latent_dim, latent_dim)
+        Autoregressive noise covariances.
+    delta_h: jax array of shape (num_states,)
+        Mean change in heading for each discrete state.
+    sigmasq_h: jax array of shape (num_states,)
+        Variance of change in heading for each discrete state.
+    delta_v: jax array of shape (num_states, 2)
+        Mean change in centroid for each discrete state.
+    sigmasq_v: jax array of shape (num_states,)
+        Variance of change in centroid for each discrete state.
+    pi : jax_array of shape (num_states, num_states)
+        Transition probabilities.
+    **kwargs : dict
+        Overflow, for convenience.
+
+    Returns
+    ------
+    z_marginals : jax array of shape (N, T - n_lags, num_states)
+        Marginal probability of each discrete state at each time step.
+    """
+    nlags = get_nlags(Ab)
+    num_states = pi.shape[0]
+
+    initial_distribution = jnp.ones(num_states) / num_states
+    log_likelihoods = _stateseq_log_likelihoods(
+        x, h, v, Ab, Q, delta_h, sigmasq_h, delta_v, sigmasq_v
+    )
+    masked_log_likelihoods = log_likelihoods * mask[:, nlags:, na]
+
+    smoother = lambda lls: hmm_smoother(initial_distribution, pi, lls).smoothed_probs
+    return mixed_map(smoother)(masked_log_likelihoods)
 
 
 @partial(jax.jit, static_argnames="num_states")
