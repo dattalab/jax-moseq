@@ -226,7 +226,7 @@ def perturb_heading_and_centroid(
     return h, v
 
 
-@jax.jit
+@partial(jax.jit, static_argnames=("parallel_message_passing",))
 def resample_heading_and_centroid(
     seed,
     mask,
@@ -241,6 +241,7 @@ def resample_heading_and_centroid(
     delta_v,
     sigmasq_v,
     sigmasq_height=1,
+    parallel_message_passing=True,
     **kwargs
 ):
     """
@@ -274,6 +275,10 @@ def resample_heading_and_centroid(
         Variance of centroid change for each discrete state.
     sigmasq_height : float, default=1
         Variance of height change on each step.
+    parallel_message_passing : bool, default=True
+        Use associative scan for Kalman sampling, which is faster on
+        a GPU but has a significantly longer jit time. A Python bool,
+        since it selects the compiled program.
     **kwargs : dict
         Overflow, for convenience.
 
@@ -310,7 +315,16 @@ def resample_heading_and_centroid(
     if Y.shape[-1] == 3:
         seed = jr.split(seed)[0]
         v_height = keypoint_slds.resample_location(
-            seed, Y, mask, x, h, s, Cd, sigmasq, sigmasq_height
+            seed,
+            Y,
+            mask,
+            x,
+            h,
+            s,
+            Cd,
+            sigmasq,
+            sigmasq_height,
+            parallel_message_passing=parallel_message_passing,
         )[..., 2:]
         v = jnp.concatenate([v, v_height], axis=-1)
 
@@ -437,11 +451,21 @@ def resample_model(
                 seed, **data, **states, **params
             )
             states["v"] = keypoint_slds.resample_location(
-                seed, **data, **states, **params, **hypparams["cen_hypparams"]
+                seed,
+                **data,
+                **states,
+                **params,
+                **hypparams["cen_hypparams"],
+                parallel_message_passing=parallel_message_passing
             )
         else:
             states["h"], states["v"] = resample_heading_and_centroid(
-                seed, **data, **states, **params, **hypparams["allo_hypparams"]
+                seed,
+                **data,
+                **states,
+                **params,
+                **hypparams["allo_hypparams"],
+                parallel_message_passing=parallel_message_passing
             )
 
         if not skip_noise:
