@@ -5,7 +5,8 @@
 - ``resample_model`` uses the Kalman sampler that ``parallel_message_passing``
   chooses for the location (v) step as well as the x step.
 - The heading (h) step draws each frame's angle from its von Mises
-  conditional: the draws' probability integral transform is uniform.
+  conditional: the draws' probability integral transform is uniform, at low
+  concentrations and at those of real data.
 - The scale (s) step draws s = variance / (2 g) with g from the gamma
   conditional, in float64.
 
@@ -142,11 +143,16 @@ def test_location_step_runs_either_sampler(data, model, parallel):
     assert np.isfinite(v).all()
 
 
-def test_heading_draws_follow_the_von_mises_conditional(data, model):
+@pytest.mark.parametrize("noise_scale", [1.0, 0.01])
+def test_heading_draws_follow_the_von_mises_conditional(data, model, noise_scale):
     """30,000 draws (50 seeds x 600 frames), each transformed by the CDF of
     its frame's von Mises conditional, whose angle and concentration are
-    those of the mean direction that resample_heading forms."""
+    those of the mean direction that resample_heading forms. The fixture's
+    concentrations are 6.6 to 35; with the noise variance 100 times smaller
+    they are 660 to 3,450, the upper end of what real data reach (84 to
+    3,812 in the tutorial data)."""
     inputs = step_inputs(data, model)
+    inputs["sigmasq"] = inputs["sigmasq"] * noise_scale
     seeds = jr.split(jr.PRNGKey(11), 50)
     h = jax.vmap(lambda seed: gibbs.resample_heading(seed, **inputs))(seeds)
 
