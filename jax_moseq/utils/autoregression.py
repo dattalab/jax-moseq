@@ -4,7 +4,7 @@ import jax.random as jr
 
 import tensorflow_probability.substrates.jax.distributions as tfd
 
-from jax_moseq.utils import apply_affine
+from jax_moseq.utils import apply_affine, pad_affine
 from jax_moseq.utils.distributions import sample_mniw
 
 na = jnp.newaxis
@@ -22,6 +22,26 @@ def ar_log_likelihood(x, params):
     mu = apply_ar_params(x, Ab)
     x = x[..., nlags:, :]
     return tfd.MultivariateNormalFullCovariance(mu, Q).log_prob(x)
+
+
+def ar_log_likelihoods(x, Ab, Q):
+    # Every state's ar_log_likelihood, states on the last axis, from one
+    # matrix product. With L_k = cholesky(Q_k) and u_t = [x_t, lags_t, 1], the
+    # whitened residual L_k^-1 (x_t - Ab_k [lags_t, 1]) is G_k u_t with
+    # G_k = [L_k^-1, -L_k^-1 Ab_k], and the lags are built once.
+    nlags = get_nlags(Ab)
+    num_states, latent_dim = Ab.shape[:2]
+    L = jnp.linalg.cholesky(Q)
+    eye = jnp.broadcast_to(jnp.eye(latent_dim, dtype=Q.dtype), L.shape)
+    L_inv = jax.scipy.linalg.solve_triangular(L, eye, lower=True)
+    G = jnp.concatenate([L_inv, -L_inv @ Ab], axis=-1)
+    G = G.reshape(num_states * latent_dim, -1)
+    const = -0.5 * latent_dim * jnp.log(2 * jnp.pi) - jnp.log(
+        jnp.diagonal(L, axis1=-2, axis2=-1)
+    ).sum(-1)
+    u = jnp.concatenate([x[..., nlags:, :], pad_affine(get_lags(x, nlags))], axis=-1)
+    whitened = (u @ G.T).reshape(*u.shape[:-1], num_states, latent_dim)
+    return -0.5 * (whitened**2).sum(-1) + const
 
 
 def get_lags(x, nlags):
