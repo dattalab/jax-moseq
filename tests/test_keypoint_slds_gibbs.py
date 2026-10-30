@@ -6,6 +6,8 @@
   chooses for the location (v) step as well as the x step.
 - The heading (h) step draws each frame's angle from its von Mises
   conditional: the draws' probability integral transform is uniform.
+- The scale (s) step draws s = variance / (2 g) with g from the gamma
+  conditional, in float64.
 
 Everything runs on a few hundred synthetic frames so the module finishes in
 seconds.
@@ -150,4 +152,28 @@ def test_heading_draws_follow_the_von_mises_conditional(data, model):
     assert stats.kstest(pit.ravel(), "uniform").pvalue > 0.01
     # the check detects a concentration 1.5 times too large
     wrong = stats.vonmises.cdf(deviation, 1.5 * concentration)
+    assert stats.kstest(wrong.ravel(), "uniform").pvalue < 1e-6
+
+
+def test_scale_draws_follow_the_gamma_conditional(data, model):
+    """30,000 draws (10 seeds x 600 frames x 5 keypoints): g = variance / (2 s)
+    transformed by the CDF of Gamma((nu_s + 3) / 2)."""
+    inputs = step_inputs(data, model)
+    obs = model["hypparams"]["obs_hypparams"]
+    s_0 = model["noise_prior"]
+    seeds = jr.split(jr.PRNGKey(12), 10)
+    s = jax.vmap(
+        lambda seed: gibbs.resample_scales(seed, **inputs, s_0=s_0, **obs)
+    )(seeds)
+
+    i = inputs
+    sqerr = gibbs.compute_squared_error(i["Y"], i["x"], i["v"], i["h"], i["Cd"])
+    variance = sqerr / i["sigmasq"] + s_0 * obs["nu_s"]
+    g = np.asarray(variance / (2 * s))
+    a = (obs["nu_s"] + 3) / 2
+
+    assert s.dtype == jnp.float64
+    assert stats.kstest(stats.gamma.cdf(g, a).ravel(), "uniform").pvalue > 0.01
+    # the check detects a shape parameter 10% too large
+    wrong = stats.gamma.cdf(g, 1.1 * a)
     assert stats.kstest(wrong.ravel(), "uniform").pvalue < 1e-6
