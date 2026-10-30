@@ -240,10 +240,6 @@ def _resample_regression_params(nu_0, S_0, M_0, K_0, args):
 
     Parameters
     ----------
-    x_in : jax array of shape (..., in_dim)
-        Regression input.
-    x_out : jax array of shape (..., out_dim)
-        Regression output.
     nu_0 : int
         Inverse-Wishart degrees of freedom parameter for Q.
     S_0 : jax array of shape (out_dim, out_dim)
@@ -252,16 +248,17 @@ def _resample_regression_params(nu_0, S_0, M_0, K_0, args):
         Matrix normal expectation for Ab.
     K_0 : jax array of shape (in_dim, in_dim)
         Matrix normal column scale parameter for Ab.
-    args: tuple (seed, mask)
-        JAX random seed and binary indicator for frames
-        to use for calculating the sufficient statistics.
+    args: tuple (seed, S_out_out, S_out_in, S_in_in, n)
+        JAX random seed, the sufficient statistics (sums of
+        x_out x_out^T, x_out x_in^T and x_in x_in^T over the frames
+        used) and the number of frames used.
 
     Returns
     ------
-    Ab : jax array of shape (num_states, out_dim, in_dim)
-        Regression transforms.
-    Q : jax array of shape (num_states, out_dim, out_dim)
-        Regression noise covariances.
+    Ab : jax array of shape (out_dim, in_dim)
+        Regression transform.
+    Q : jax array of shape (out_dim, out_dim)
+        Regression noise covariance.
     """
     seed, S_out_out, S_out_in, S_in_in, n = args
 

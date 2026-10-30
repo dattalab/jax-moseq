@@ -85,6 +85,10 @@ def _choice(p, u):
 def sample_hmm_stateseq(seed, transition_matrix, log_likelihoods, mask):
     """Sample state sequences in a Markov chain.
 
+    Forward filtering, backward sampling, with the arithmetic and random
+    draws of dynamax's ``hmm_posterior_sample`` (uniform initial
+    distribution); see :py:func:`sample_hmm_stateseq_from_likelihoods`.
+
     Parameters
     ----------
     seed: jax.random.PRNGKey
@@ -112,13 +116,35 @@ def sample_hmm_stateseq(seed, transition_matrix, log_likelihoods, mask):
 
 
 def sample_hmm_stateseq_from_likelihoods(seed, transition_matrix, likelihoods, ll_max):
-    # Forward filtering, backward sampling with the arithmetic and draws of
-    # dynamax's hmm_posterior_sample (uniform initial distribution), given
-    # likelihoods[t] = exp(log_likelihoods[t] - ll_max[t]). The forward pass
-    # overwrites each time step's likelihoods with its filtered probabilities,
-    # so one (num_timesteps, num_states) array serves both. The backward pass's
-    # uniform draws are made before the pass, and each state is located among
-    # the cumulative probabilities with one vectorized comparison.
+    """Sample state sequences in a Markov chain from scaled likelihoods.
+
+    ``likelihoods[t] = exp(log_likelihoods[t] - ll_max[t])``, where
+    ``ll_max[t]`` is the largest log likelihood at time ``t`` (zero for
+    masked frames). The forward pass overwrites each time step's likelihoods
+    with its filtered probabilities, so that one ``(num_timesteps,
+    num_states)`` array serves both. The uniform draws of the backward pass
+    are made for all time steps before the pass, and each state is located
+    in the cumulative probabilities with one vectorized comparison. The
+    arithmetic and the draws are those of dynamax's ``hmm_posterior_sample``.
+
+    Parameters
+    ----------
+    seed: jax.random.PRNGKey
+        Random seed
+    transition_matrix: jax array, shape (num_states, num_states)
+        Transition matrix
+    likelihoods: jax array, shape (num_timesteps, num_states)
+        Emission likelihoods scaled by ``exp(-ll_max)`` at each time step
+    ll_max: jax array, shape (num_timesteps,)
+        Log of the scale of each time step's likelihoods
+
+    Returns
+    -------
+    log_norm: float
+        Posterior marginal log likelihood
+    states: jax array, shape (num_timesteps,)
+        Sequence of sampled states
+    """
     num_timesteps, num_states = likelihoods.shape
     initial_distribution = jnp.ones(num_states) / num_states
 

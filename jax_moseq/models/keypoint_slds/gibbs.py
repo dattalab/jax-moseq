@@ -65,9 +65,10 @@ def resample_continuous_stateseqs(
     jitter : float, default=1e-3
         Amount to boost the diagonal of the covariance matrix
         during backward-sampling of the continuous states.
-    parallel_message_passing : bool, default=True,
+    parallel_message_passing : bool, default=True
         Use associative scan for Kalman sampling, which is faster on
-        a GPU but has a significantly longer jit time.
+        a GPU but has a significantly longer jit time. A Python bool,
+        since it selects the compiled program.
     **kwargs : dict
         Overflow, for convenience.
 
@@ -293,9 +294,10 @@ def resample_location(
         Unscaled noise.
     sigmasq_loc : float
         Assumed variance in centroid displacements.
-    parallel_message_passing : bool, default=True,
+    parallel_message_passing : bool, default=True
         Use associative scan for Kalman sampling, which is faster on
-        a GPU but has a significantly longer jit time.
+        a GPU but has a significantly longer jit time. A Python bool,
+        since it selects the compiled program.
     **kwargs : dict
         Overflow, for convenience.
 
@@ -407,9 +409,10 @@ def resample_model(
         during backward-sampling of the continuous states.
     verbose : bool, default=False
         Whether to print progress info during resampling.
-    parallel_message_passing : bool, default=True,
-        Use associative scan for Kalman sampling, which is faster on
-        a GPU but has a significantly longer jit time.
+    parallel_message_passing : bool, default=False
+        Use associative scan for the Kalman sampling of the continuous
+        states and the centroid, which is faster on a GPU but has a
+        significantly longer jit time.
 
     Returns
     ------

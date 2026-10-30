@@ -25,10 +25,30 @@ def ar_log_likelihood(x, params):
 
 
 def ar_log_likelihoods(x, Ab, Q):
-    # Every state's ar_log_likelihood, states on the last axis, from one
-    # matrix product. With L_k = cholesky(Q_k) and u_t = [x_t, lags_t, 1], the
-    # whitened residual L_k^-1 (x_t - Ab_k [lags_t, 1]) is G_k u_t with
-    # G_k = [L_k^-1, -L_k^-1 Ab_k], and the lags are built once.
+    """
+    Log-likelihood of each frame under every autoregressive state.
+
+    Equal to stacking ``ar_log_likelihood(x, (Ab[k], Q[k]))`` over states on
+    the last axis, up to rounding. With ``L_k = cholesky(Q_k)`` and
+    ``u_t = [x_t, lags_t, 1]``, the whitened residual
+    ``L_k^-1 (x_t - Ab_k [lags_t, 1])`` is ``G_k u_t`` with
+    ``G_k = [L_k^-1, -L_k^-1 Ab_k]``, so all states' residuals come from one
+    matrix product and the lags are built once.
+
+    Parameters
+    ----------
+    x : jax array of shape (..., t, latent_dim)
+        Latent trajectories.
+    Ab : jax array of shape (num_states, latent_dim, latent_dim * nlags + 1)
+        Autoregressive transforms.
+    Q : jax array of shape (num_states, latent_dim, latent_dim)
+        Autoregressive noise covariances.
+
+    Returns
+    -------
+    log_likelihoods : jax array of shape (..., t - nlags, num_states)
+        Log-likelihood of each frame under each state.
+    """
     nlags = get_nlags(Ab)
     num_states, latent_dim = Ab.shape[:2]
     L = jnp.linalg.cholesky(Q)
