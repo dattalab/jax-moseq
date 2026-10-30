@@ -18,7 +18,6 @@ from jax_moseq.models.keypoint_slds.alignment import (
 na = jnp.newaxis
 
 
-@partial(jax.jit, static_argnames=("parallel_message_passing",))
 def resample_continuous_stateseqs(
     seed,
     Y,
@@ -77,6 +76,15 @@ def resample_continuous_stateseqs(
     x : jax array of shape (N, T, latent_dim)
         Latent trajectories.
     """
+    return _resample_continuous_stateseqs(
+        seed, Y, mask, v, h, s, z, Cd, sigmasq, Ab, Q, jitter, parallel_message_passing
+    )
+
+
+@partial(jax.jit, static_argnames=("parallel_message_passing",))
+def _resample_continuous_stateseqs(
+    seed, Y, mask, v, h, s, z, Cd, sigmasq, Ab, Q, jitter, parallel_message_passing
+):
     Y, s, Cd, sigmasq = to_vanilla_slds(Y, v, h, s, Cd, sigmasq)
     x = slds.resample_continuous_stateseqs(
         seed,

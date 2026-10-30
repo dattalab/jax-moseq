@@ -78,9 +78,10 @@ def step_inputs(data, model):
 
 @pytest.mark.parametrize("parallel", [False, True])
 def test_x_step_compiles_as_one_program(data, model, parallel):
-    inputs = step_inputs(data, model)
-    lowered = gibbs.resample_continuous_stateseqs.lower(
-        model["seed"], **inputs, parallel_message_passing=parallel
+    i = step_inputs(data, model)
+    lowered = gibbs._resample_continuous_stateseqs.lower(
+        model["seed"], i["Y"], i["mask"], i["v"], i["h"], i["s"], i["z"], i["Cd"],
+        i["sigmasq"], i["Ab"], i["Q"], 1e-3, parallel_message_passing=parallel,
     )
     memory = lowered.compile().memory_analysis()
     assert memory.temp_size_in_bytes > 0
@@ -100,6 +101,19 @@ def test_x_step_matches_its_steps_run_eagerly(data, model, parallel):
     )
     assert x.shape == (N_SEGMENTS, T, LATENT_DIM)
     np.testing.assert_allclose(x, expected, rtol=1e-8, atol=1e-8)
+
+
+def test_x_step_ignores_extra_keywords(data, model):
+    """As in 0.3.8, keywords the step doesn't use are ignored whatever their
+    type ("Overflow, for convenience")."""
+    inputs = step_inputs(data, model)
+    x = gibbs.resample_continuous_stateseqs(
+        model["seed"], **inputs, session_name="mouse1", parallel_message_passing=False
+    )
+    expected = gibbs.resample_continuous_stateseqs(
+        model["seed"], **inputs, parallel_message_passing=False
+    )
+    np.testing.assert_array_equal(x, expected)
 
 
 @pytest.mark.parametrize("parallel", [False, True])
