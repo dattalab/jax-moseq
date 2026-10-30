@@ -98,6 +98,11 @@ def convert_data_precision(data, x64=None):
     return jax.tree_util.tree_map(convert, data)
 
 
+@jax.jit
+def _count_nans(arrays):
+    return jnp.stack([jnp.isnan(a).sum() for a in arrays])
+
+
 def check_for_nans(data):
     """
     Check for NaNs in all arrays of a pytree.
@@ -126,14 +131,22 @@ def check_for_nans(data):
         msg = f"{num_nan} NaNs found in {path}"
         return msg
 
+    # The NaNs of every floating-point array are counted in one jitted call,
+    # so the check costs one compiled program and one transfer from the device.
+    paths, values = tree_flatten_with_path(data)[:2]
+    checked = [
+        i
+        for i, value in enumerate(values)
+        if isinstance(value, jnp.ndarray) and jnp.issubdtype(value.dtype, jnp.inexact)
+    ]
     nan_info = []
     messages = []
-    for path, value in zip(*tree_flatten_with_path(data)[:2]):
-        if isinstance(value, jnp.ndarray):
-            if jnp.isnan(value).any():
-                num_nans = jnp.isnan(value).sum().item()
-                nan_info.append((path, num_nans))
-                messages.append(_format(path, num_nans))
+    if checked:
+        counts = jax.device_get(_count_nans([values[i] for i in checked]))
+        for i, num_nans in zip(checked, counts):
+            if num_nans > 0:
+                nan_info.append((paths[i], int(num_nans)))
+                messages.append(_format(paths[i], int(num_nans)))
 
     any_nans = len(nan_info) > 0
     return any_nans, nan_info, messages
