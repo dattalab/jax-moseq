@@ -506,7 +506,14 @@ def mixed_map(fun, in_axes=None, out_axes=None):
             mapped_args, [in_axes[i] for i in mapped_argnums]
         )
         f = _partial(fun, other_args, mapped_argnums, other_argnums)
-        outputs = jax.lax.map(jax.pmap(jax.vmap(f)), mapped_args)
+        if get_mixed_map_gpus() == 1:
+            # pmap over one device adds nothing, and its outputs carry a
+            # sharding over pmap's own mesh. Every jitted step that later
+            # receives such an array misses its cache and recompiles.
+            device_map = jax.vmap(jax.vmap(f))
+        else:
+            device_map = jax.pmap(jax.vmap(f))
+        outputs = jax.lax.map(device_map, mapped_args)
 
         if not isinstance(outputs, tuple) or isinstance(outputs, list):
             outputs = (outputs,)
