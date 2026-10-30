@@ -2,6 +2,8 @@
 
 - The continuous-state (x) step compiles as one program, so XLA's
   compile-time memory analysis covers it (#287), for either Kalman sampler.
+- ``resample_model`` uses the Kalman sampler that ``parallel_message_passing``
+  chooses for the location (v) step as well as the x step.
 
 Everything runs on a few hundred synthetic frames so the module finishes in
 seconds.
@@ -88,3 +90,29 @@ def test_x_step_matches_its_steps_run_eagerly(data, model, parallel):
     )
     assert x.shape == (N_SEGMENTS, T, LATENT_DIM)
     np.testing.assert_allclose(x, expected, rtol=1e-8, atol=1e-8)
+
+
+@pytest.mark.parametrize("parallel", [False, True])
+def test_resample_model_passes_sampler_choice_to_location_step(
+    monkeypatch, data, model, parallel
+):
+    calls = []
+
+    def location_step(*args, **kwargs):
+        calls.append(kwargs.get("parallel_message_passing", "not passed"))
+        return kwargs["v"]
+
+    monkeypatch.setattr(gibbs, "resample_location", location_step)
+    keypoint_slds.resample_model(data, **model, parallel_message_passing=parallel)
+    assert calls == [parallel]
+
+
+@pytest.mark.parametrize("parallel", [False, True])
+def test_location_step_runs_either_sampler(data, model, parallel):
+    inputs = step_inputs(data, model)
+    v = gibbs.resample_location(
+        model["seed"], **inputs, **model["hypparams"]["cen_hypparams"],
+        parallel_message_passing=parallel,
+    )
+    assert v.shape == (N_SEGMENTS, T, 2)
+    assert np.isfinite(v).all()

@@ -254,7 +254,7 @@ def resample_heading(seed, Y, x, v, s, Cd, sigmasq, **kwargs):
     return h
 
 
-@jax.jit
+@partial(jax.jit, static_argnames=("parallel_message_passing",))
 def resample_location(
     seed,
     Y,
@@ -457,7 +457,12 @@ def resample_model(
     if verbose:
         print("Resampling v (location)")
     states["v"] = resample_location(
-        seed, **data, **states, **params, **hypparams["cen_hypparams"]
+        seed,
+        **data,
+        **states,
+        **params,
+        **hypparams["cen_hypparams"],
+        parallel_message_passing=parallel_message_passing
     )
 
     if resample_local_noise_scale:
