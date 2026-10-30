@@ -4,6 +4,10 @@ Both run an HMM smoother or filter on every state's AR log likelihood at every
 frame, so they must equal the same smoother or filter run on TFP's per-state
 multivariate normal (``ar_log_likelihood``) to rounding, with masked frames
 contributing nothing.
+
+The marginal log likelihood's filter keeps only a running total per segment,
+so splitting the segments into ``mixed_map`` passes would save no memory and
+only add time: it runs all segments at once, whatever ``mixed_map_iters`` is.
 """
 
 from functools import partial
@@ -17,7 +21,8 @@ import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 from dynamax.hidden_markov_model.inference import hmm_filter, hmm_smoother  # noqa: E402
 
-from jax_moseq.models import arhmm  # noqa: E402
+from jax_moseq.models import arhmm, robust_arhmm  # noqa: E402
+from jax_moseq.utils import get_mixed_map_iters, set_mixed_map_iters  # noqa: E402
 from jax_moseq.utils.autoregression import ar_log_likelihood  # noqa: E402
 
 na = jnp.newaxis
@@ -78,3 +83,22 @@ def test_marginal_log_likelihood_matches_per_state_computation(model):
     expected = jax.vmap(lambda ll: hmm_filter(initial, m["pi"], ll).marginal_loglik)(lls).sum()
 
     np.testing.assert_allclose(mll, expected, rtol=1e-10)
+
+
+@pytest.mark.parametrize("module", [arhmm, robust_arhmm], ids=["arhmm", "robust_arhmm"])
+def test_marginal_log_likelihood_runs_all_segments_at_once(model, module):
+    m = model
+    args = (m["mask"], m["x"], m["Ab"], m["Q"], m["pi"])
+    if module is robust_arhmm:
+        args += (jnp.full(NUM_STATES, 5.0),)
+    programs = []
+    before = get_mixed_map_iters()
+    try:
+        for iters in (1, 32):
+            set_mixed_map_iters(iters)
+            module.marginal_log_likelihood.clear_cache()
+            programs.append(module.marginal_log_likelihood.lower(*args).as_text())
+    finally:
+        set_mixed_map_iters(before)
+        module.marginal_log_likelihood.clear_cache()
+    assert programs[0] == programs[1]

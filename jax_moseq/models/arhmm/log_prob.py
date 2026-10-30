@@ -7,7 +7,6 @@ from jax_moseq.utils.autoregression import (
     ar_log_likelihood,
     ar_log_likelihoods,
 )
-from jax_moseq.utils import mixed_map
 from dynamax.hidden_markov_model.inference import hmm_filter
 from functools import partial
 
@@ -183,5 +182,7 @@ def marginal_log_likelihood(mask, x, Ab, Q, pi, **kwargs):
     masked_log_likelihoods = log_likelihoods * mask[:, nlags:, None]
 
     get_mll = lambda ll: hmm_filter(initial_distribution, pi, ll).marginal_loglik.sum()
-    mlls = mixed_map(get_mll)(masked_log_likelihoods)
+    # all segments at once: the filter keeps only a running total per
+    # segment, so mixed_map's passes would save no memory
+    mlls = jax.vmap(get_mll)(masked_log_likelihoods)
     return mlls.sum()

@@ -6,7 +6,6 @@ from jax.scipy.linalg import solve_triangular
 from jax.scipy.special import gammaln
 from dynamax.hidden_markov_model.inference import hmm_filter
 
-from jax_moseq.utils import mixed_map
 from jax_moseq.utils.autoregression import apply_ar_params, get_nlags
 from jax_moseq.models.arhmm.log_prob import discrete_stateseq_log_prob
 
@@ -292,5 +291,7 @@ def marginal_log_likelihood(mask, x, Ab, Q, pi, nu, **kwargs):
     get_mll = lambda ll: hmm_filter(
         initial_distribution, pi, ll
     ).marginal_loglik.sum()
-    mlls = mixed_map(get_mll)(masked_log_likelihoods)
+    # all segments at once: the filter keeps only a running total per
+    # segment, so mixed_map's passes would save no memory
+    mlls = jax.vmap(get_mll)(masked_log_likelihoods)
     return mlls.sum()
