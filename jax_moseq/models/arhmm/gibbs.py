@@ -200,18 +200,39 @@ def resample_ar_params(
     """
     seeds = jr.split(seed, num_states)
 
-    masks = mask[..., nlags:].reshape(1, -1) * jnp.eye(num_states)[:, z.reshape(-1)]
-    x_in = pad_affine(get_lags(x, nlags)).reshape(-1, nlags * x.shape[-1] + 1)
-    x_out = x[..., nlags:, :].reshape(-1, x.shape[-1])
+    # Per-state sufficient statistics: sums of the outer products of
+    # u = [x_in, x_out] over each state's frames, accumulated a segment at a
+    # time so that no (num_states, frames) array is formed.
+    x_in = pad_affine(get_lags(x, nlags))
+    x_out = x[..., nlags:, :]
+    u = jnp.concatenate([x_in, x_out], axis=-1)
+    weights = mask[..., nlags:]
 
-    map_fun = partial(_resample_regression_params, x_in, x_out, nu_0, S_0, M_0, K_0)
-    Ab, Q = jax.lax.map(map_fun, (seeds, masks))
+    def add_segment(stats, args):
+        u, weights, z = args
+        outer = u[:, :, na] * u[:, na, :] * weights[:, na, na]
+        return stats + jax.ops.segment_sum(outer, z, num_segments=num_states), None
+
+    dim = u.shape[-1]
+    stats, _ = jax.lax.scan(
+        add_segment, jnp.zeros((num_states, dim, dim)), (u, weights, z)
+    )
+    counts = jax.ops.segment_sum(
+        weights.reshape(-1), z.reshape(-1), num_segments=num_states
+    )
+    d_in = x_in.shape[-1]
+    S_out_out = stats[:, d_in:, d_in:]
+    S_out_in = stats[:, d_in:, :d_in]
+    S_in_in = stats[:, :d_in, :d_in]
+
+    map_fun = partial(_resample_regression_params, nu_0, S_0, M_0, K_0)
+    Ab, Q = jax.lax.map(map_fun, (seeds, S_out_out, S_out_in, S_in_in, counts))
     return Ab, Q
 
 
 @nan_check
 @jax.jit
-def _resample_regression_params(x_in, x_out, nu_0, S_0, M_0, K_0, args):
+def _resample_regression_params(nu_0, S_0, M_0, K_0, args):
     """
     Resamples regression parameters from a Matrix normal
     inverse-Wishart distribution.
@@ -241,11 +262,7 @@ def _resample_regression_params(x_in, x_out, nu_0, S_0, M_0, K_0, args):
     Q : jax array of shape (num_states, out_dim, out_dim)
         Regression noise covariances.
     """
-    seed, mask = args
-
-    S_out_out = jnp.einsum("ti,tj,t->ij", x_out, x_out, mask)
-    S_out_in = jnp.einsum("ti,tj,t->ij", x_out, x_in, mask)
-    S_in_in = jnp.einsum("ti,tj,t->ij", x_in, x_in, mask)
+    seed, S_out_out, S_out_in, S_in_in, n = args
 
     K_0_inv = psd_inv(K_0)
     K_n_inv = K_0_inv + S_in_in
@@ -254,7 +271,7 @@ def _resample_regression_params(x_in, x_out, nu_0, S_0, M_0, K_0, args):
     M_n = psd_solve(K_n_inv.T, K_0_inv @ M_0.T + S_out_in.T).T
 
     S_n = S_0 + S_out_out + (M_0 @ K_0_inv @ M_0.T - M_n @ K_n_inv @ M_n.T)
-    return sample_mniw(seed, nu_0 + mask.sum(), S_n, M_n, K_n)
+    return sample_mniw(seed, nu_0 + n, S_n, M_n, K_n)
 
 
 def resample_model(
