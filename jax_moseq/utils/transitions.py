@@ -49,7 +49,7 @@ def count_transitions(num_states, stateseqs, mask):
     return transition_counts
 
 
-@njit
+@njit(cache=True)
 def _sample_loyal_crf_table_counts(
     rng, customer_counts, dish_ratings, loyalty
 ):
