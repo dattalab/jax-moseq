@@ -1,8 +1,8 @@
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+from jax import lax
 import tensorflow_probability.substrates.jax.distributions as tfd
-from dynamax.hidden_markov_model.inference import hmm_posterior_sample
 from jax_moseq.utils import convert_data_precision
 
 na = jnp.newaxis
@@ -67,6 +67,21 @@ def sample_mniw(seed, nu, S, M, K):
     return A, sigma
 
 
+def _normalize(u, eps=1e-15):
+    # dynamax's HMM filter normalization
+    u = jnp.where(u == 0, 0, jnp.where(u < eps, eps, u))
+    c = u.sum()
+    c = jnp.where(c == 0, 1, c)
+    return u / c, c
+
+
+def _choice(p, u):
+    # jr.choice(key, len(p), p=p), given u = jr.uniform(key, dtype=p.dtype)
+    p_cuml = jnp.cumsum(p)
+    r = p_cuml[-1] * (1 - u)
+    return jnp.searchsorted(p_cuml, r, method="compare_all").astype(int)
+
+
 def sample_hmm_stateseq(seed, transition_matrix, log_likelihoods, mask):
     """Sample state sequences in a Markov chain.
 
@@ -88,13 +103,49 @@ def sample_hmm_stateseq(seed, transition_matrix, log_likelihoods, mask):
     states: jax array, shape (num_timesteps,)
         Sequence of sampled states
     """
+    log_likelihoods = log_likelihoods * mask[:, None]
+    ll_max = log_likelihoods.max(axis=1)
+    likelihoods = jnp.exp(log_likelihoods - ll_max[:, None])
+    return sample_hmm_stateseq_from_likelihoods(
+        seed, transition_matrix, likelihoods, ll_max
+    )
 
-    num_states = transition_matrix.shape[0]
+
+def sample_hmm_stateseq_from_likelihoods(seed, transition_matrix, likelihoods, ll_max):
+    # Forward filtering, backward sampling with the arithmetic and draws of
+    # dynamax's hmm_posterior_sample (uniform initial distribution), given
+    # likelihoods[t] = exp(log_likelihoods[t] - ll_max[t]). The forward pass
+    # overwrites each time step's likelihoods with its filtered probabilities,
+    # so one (num_timesteps, num_states) array serves both. The backward pass's
+    # uniform draws are made before the pass, and each state is located among
+    # the cumulative probabilities with one vectorized comparison.
+    num_timesteps, num_states = likelihoods.shape
     initial_distribution = jnp.ones(num_states) / num_states
 
-    masked_log_likelihoods = log_likelihoods * mask[:, None]
-    L, z = hmm_posterior_sample(
-        seed, initial_distribution, transition_matrix, masked_log_likelihoods
+    def forward(carry, t):
+        log_normalizer, predicted_probs, probs = carry
+        filtered_probs, norm = _normalize(predicted_probs * probs[t])
+        log_normalizer += jnp.log(norm) + ll_max[t]
+        probs = probs.at[t].set(filtered_probs)
+        return (log_normalizer, transition_matrix.T @ filtered_probs, probs), None
+
+    carry = (0.0, initial_distribution, likelihoods)
+    (log_normalizer, _, filtered_probs), _ = lax.scan(
+        forward, carry, jnp.arange(num_timesteps)
     )
-    z = convert_data_precision(z)
-    return L, z
+
+    keys = jr.split(seed, num_timesteps)
+    u = jax.vmap(lambda key: jr.uniform(key, dtype=filtered_probs.dtype))(keys)
+    last_state = _choice(filtered_probs[-1], u[-1])
+
+    def backward(next_state, t):
+        smoothed_probs = filtered_probs[t] * transition_matrix[:, next_state]
+        smoothed_probs /= smoothed_probs.sum()
+        state = _choice(smoothed_probs, u[t])
+        return state, state
+
+    _, states = lax.scan(
+        backward, last_state, jnp.arange(num_timesteps - 1), reverse=True
+    )
+    states = jnp.concatenate([states, jnp.array([last_state])])
+    return log_normalizer, convert_data_precision(states)
