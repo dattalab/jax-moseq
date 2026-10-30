@@ -11,7 +11,7 @@ na = jnp.newaxis
 
 # The AR steps form their per-frame products for at most this many frames at a
 # time, so the memory they hold doesn't grow with the length of a segment.
-FRAMES_PER_CHUNK = 16384
+FRAMES_PER_CHUNK = 4096
 
 
 def split_frames(arrays):
