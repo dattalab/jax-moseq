@@ -26,6 +26,7 @@ from jax_moseq.utils.autoregression import (
     get_nlags,
     ar_log_likelihood,
     ar_log_likelihoods,
+    split_frames,
 )
 from jax_moseq.utils.transitions import resample_hdp_transitions
 from functools import partial
@@ -202,26 +203,37 @@ def resample_ar_params(
     seeds = jr.split(seed, num_states)
 
     # Per-state sufficient statistics: sums of the outer products of
-    # u = [x_in, x_out] over each state's frames, accumulated a segment at a
-    # time so that no (num_states, frames) array is formed.
-    x_in = pad_affine(get_lags(x, nlags))
-    x_out = x[..., nlags:, :]
-    u = jnp.concatenate([x_in, x_out], axis=-1)
-    weights = mask[..., nlags:]
+    # u = [x_in, x_out] over each state's frames. A segment at a time, and
+    # within it a chunk of frames at a time, the chunk's outer products are
+    # added into their states by one matrix product with its one-hot labels.
+    # So no (num_states, frames) array and nothing the length of a segment is
+    # formed, and the sums don't depend on the order of a GPU's atomic
+    # additions, as a scatter-add's do.
+    x = x.reshape(-1, *x.shape[-2:])
+    weights = mask[..., nlags:].reshape(x.shape[0], -1).astype(x.dtype)
+    z = z.reshape(x.shape[0], -1)
+    d_in = x.shape[-1] * nlags + 1
+    dim = d_in + x.shape[-1]
 
-    def add_segment(stats, args):
+    def add_chunk(sums, args):
         u, weights, z = args
-        outer = u[:, :, na] * u[:, na, :] * weights[:, na, na]
-        return stats + jax.ops.segment_sum(outer, z, num_segments=num_states), None
+        labels = jax.nn.one_hot(z, num_states, dtype=u.dtype) * weights[:, na]
+        outer = (u[:, :, na] * u[:, na, :]).reshape(-1, dim * dim)
+        stats, counts = sums
+        stats = stats + jnp.matmul(
+            labels.T, outer, precision=jax.lax.Precision.HIGHEST
+        )
+        return (stats, counts + labels.sum(0)), None
 
-    dim = u.shape[-1]
-    stats, _ = jax.lax.scan(
-        add_segment, jnp.zeros((num_states, dim, dim)), (u, weights, z)
-    )
-    counts = jax.ops.segment_sum(
-        weights.reshape(-1), z.reshape(-1), num_segments=num_states
-    )
-    d_in = x_in.shape[-1]
+    def add_segment(sums, args):
+        x, weights, z = args
+        u = jnp.concatenate([pad_affine(get_lags(x, nlags)), x[nlags:]], axis=-1)
+        chunks, _ = split_frames([u, weights, z])
+        return jax.lax.scan(add_chunk, sums, chunks)[0], None
+
+    sums = (jnp.zeros((num_states, dim * dim), x.dtype), jnp.zeros(num_states, x.dtype))
+    (stats, counts), _ = jax.lax.scan(add_segment, sums, (x, weights, z))
+    stats = stats.reshape(num_states, dim, dim)
     S_out_out = stats[:, d_in:, d_in:]
     S_out_in = stats[:, d_in:, :d_in]
     S_in_in = stats[:, :d_in, :d_in]
