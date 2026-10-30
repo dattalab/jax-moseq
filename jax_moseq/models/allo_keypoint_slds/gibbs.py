@@ -8,7 +8,11 @@ import time
 
 from jax_moseq.models import keypoint_slds, arhmm, allo_dynamics
 from jax_moseq.utils import convert_data_precision, mixed_map
-from jax_moseq.utils.autoregression import get_nlags, ar_log_likelihood
+from jax_moseq.utils.autoregression import (
+    get_nlags,
+    ar_log_likelihood,
+    ar_log_likelihoods,
+)
 from jax_moseq.models.keypoint_slds import (
     angle_to_rotation_matrix,
     estimate_aligned,
@@ -38,8 +42,10 @@ def _stateseq_log_likelihoods(
     nlags = get_nlags(Ab)
     ll_fun = jax.vmap(partial(allo_dynamics.allo_log_likelihood, h, v[..., :2]))
     log_likelihoods = ll_fun(delta_h, sigmasq_h, delta_v, sigmasq_v)[..., nlags - 1 :]
-    log_likelihoods += jax.lax.map(partial(ar_log_likelihood, x), (Ab, Q))
-    return jnp.moveaxis(log_likelihoods, 0, -1)
+    log_likelihoods = jnp.moveaxis(log_likelihoods, 0, -1)
+    # AR log likelihoods one segment at a time, so only one segment's whitened
+    # residuals are held at once
+    return log_likelihoods + jax.lax.map(lambda x: ar_log_likelihoods(x, Ab, Q), x)
 
 
 @jax.jit

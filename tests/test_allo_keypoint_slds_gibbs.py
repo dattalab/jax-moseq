@@ -1,11 +1,16 @@
 """Gibbs steps of the location-aware keypoint SLDS on a small synthetic dataset.
 
-``resample_model`` uses the Kalman sampler that ``parallel_message_passing``
-chooses wherever it samples the centroid with
-``keypoint_slds.resample_location``: the whole centroid when
-``ignore_allo_dynamics_for_location_sampling`` is set, and the height of 3D
-keypoints otherwise.
+- ``resample_model`` uses the Kalman sampler that ``parallel_message_passing``
+  chooses wherever it samples the centroid with
+  ``keypoint_slds.resample_location``: the whole centroid when
+  ``ignore_allo_dynamics_for_location_sampling`` is set, and the height of 3D
+  keypoints otherwise.
+- ``resample_discrete_stateseqs`` draws the same states as TFP's per-state AR
+  log likelihoods plus the heading and centroid log likelihoods, followed by
+  the sampler.
 """
+
+from functools import partial
 
 import jax
 
@@ -16,8 +21,12 @@ import jax.random as jr  # noqa: E402
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402
 
-from jax_moseq.models import allo_keypoint_slds, keypoint_slds  # noqa: E402
+from jax_moseq.models import allo_dynamics, allo_keypoint_slds, keypoint_slds  # noqa: E402
 from jax_moseq.models.allo_keypoint_slds import gibbs  # noqa: E402
+from jax_moseq.utils.autoregression import ar_log_likelihood  # noqa: E402
+from jax_moseq.utils.distributions import sample_hmm_stateseq  # noqa: E402
+
+na = jnp.newaxis
 
 N_SEGMENTS = 3
 T = 200
@@ -101,3 +110,33 @@ def test_resample_model_passes_sampler_choice_to_location_step(
     # the extended Kalman sampler instead.
     uses_location_step = ignore_allo or data["Y"].shape[-1] == 3
     assert calls == ([parallel] if uses_location_step else [])
+
+
+def test_resample_discrete_stateseqs_draws_as_per_state_computation(data_and_model):
+    """The states drawn from TFP's per-state AR log likelihoods plus the
+    heading and centroid log likelihoods, one key per segment, as jax-moseq
+    0.3.8 computed them."""
+    data, model = data_and_model
+    s, p = model["states"], model["params"]
+    seed = jr.PRNGKey(5)
+    z = allo_keypoint_slds.resample_discrete_stateseqs(seed, **data, **s, **p)
+
+    @jax.jit
+    def reference(seed, x, h, v, mask, Ab, Q, delta_h, sigmasq_h, delta_v, sigmasq_v, pi):
+        ll_fun = jax.vmap(partial(allo_dynamics.allo_log_likelihood, h, v[..., :2]))
+        lls = ll_fun(delta_h, sigmasq_h, delta_v, sigmasq_v)[..., NLAGS - 1 :]
+        lls += jax.lax.map(partial(ar_log_likelihood, x), (Ab, Q))
+        _, z = jax.vmap(sample_hmm_stateseq, in_axes=(0, na, 0, 0))(
+            jr.split(seed, mask.shape[0]),
+            pi,
+            jnp.moveaxis(lls, 0, -1),
+            mask.astype(float)[:, NLAGS:],
+        )
+        return z
+
+    expected = reference(
+        seed, s["x"], s["h"], s["v"], data["mask"], p["Ab"], p["Q"],
+        p["delta_h"], p["sigmasq_h"], p["delta_v"], p["sigmasq_v"], p["pi"],
+    )
+    assert z.shape == (N_SEGMENTS, T - NLAGS)
+    np.testing.assert_array_equal(z, expected)

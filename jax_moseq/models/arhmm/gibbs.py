@@ -105,8 +105,9 @@ def stateseq_marginals(x, mask, Ab, Q, pi, **kwargs):
     num_states = pi.shape[0]
 
     initial_distribution = jnp.ones(num_states) / num_states
-    log_likelihoods = jax.lax.map(partial(ar_log_likelihood, x), (Ab, Q))
-    log_likelihoods = jnp.moveaxis(log_likelihoods, 0, -1)
+    # one segment at a time, so only one segment's whitened residuals are
+    # held at once
+    log_likelihoods = jax.lax.map(lambda x: ar_log_likelihoods(x, Ab, Q), x)
     masked_log_likelihoods = log_likelihoods * mask[:, nlags:, na]
 
     smoother = lambda lls: hmm_smoother(initial_distribution, pi, lls).smoothed_probs
