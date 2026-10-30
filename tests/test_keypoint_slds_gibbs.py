@@ -4,6 +4,8 @@
   compile-time memory analysis covers it (#287), for either Kalman sampler.
 - ``resample_model`` uses the Kalman sampler that ``parallel_message_passing``
   chooses for the location (v) step as well as the x step.
+- The heading (h) step draws each frame's angle from its von Mises
+  conditional: the draws' probability integral transform is uniform.
 
 Everything runs on a few hundred synthetic frames so the module finishes in
 seconds.
@@ -17,10 +19,16 @@ import jax.numpy as jnp  # noqa: E402
 import jax.random as jr  # noqa: E402
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402
+from scipy import stats  # noqa: E402
 
 from jax_moseq.models import keypoint_slds, slds  # noqa: E402
 from jax_moseq.models.keypoint_slds import gibbs  # noqa: E402
-from jax_moseq.models.keypoint_slds.alignment import to_vanilla_slds  # noqa: E402
+from jax_moseq.models.keypoint_slds.alignment import (  # noqa: E402
+    estimate_aligned,
+    to_vanilla_slds,
+)
+
+na = jnp.newaxis
 
 N_SEGMENTS = 3
 T = 200
@@ -116,3 +124,30 @@ def test_location_step_runs_either_sampler(data, model, parallel):
     )
     assert v.shape == (N_SEGMENTS, T, 2)
     assert np.isfinite(v).all()
+
+
+def test_heading_draws_follow_the_von_mises_conditional(data, model):
+    """30,000 draws (50 seeds x 600 frames), each transformed by the CDF of
+    its frame's von Mises conditional, whose angle and concentration are
+    those of the mean direction that resample_heading forms."""
+    inputs = step_inputs(data, model)
+    seeds = jr.split(jr.PRNGKey(11), 50)
+    h = jax.vmap(lambda seed: gibbs.resample_heading(seed, **inputs))(seeds)
+
+    i = inputs
+    Y_bar = estimate_aligned(i["x"], i["Cd"], NUM_KEYPOINTS)
+    Y_cent = i["Y"] - i["v"][..., na, :]
+    variance = i["s"] * i["sigmasq"]
+    S = (Y_bar[..., :2, na] * Y_cent[..., na, :2] / variance[..., na, na]).sum(-3)
+    kappa_cos = S[..., 0, 0] + S[..., 1, 1]
+    kappa_sin = S[..., 0, 1] - S[..., 1, 0]
+    loc = np.arctan2(kappa_sin, kappa_cos)
+    concentration = np.hypot(kappa_cos, kappa_sin)
+
+    deviation = (np.asarray(h) - loc + np.pi) % (2 * np.pi) - np.pi
+    pit = stats.vonmises.cdf(deviation, concentration)
+    assert np.isfinite(pit).all()
+    assert stats.kstest(pit.ravel(), "uniform").pvalue > 0.01
+    # the check detects a concentration 1.5 times too large
+    wrong = stats.vonmises.cdf(deviation, 1.5 * concentration)
+    assert stats.kstest(wrong.ravel(), "uniform").pvalue < 1e-6

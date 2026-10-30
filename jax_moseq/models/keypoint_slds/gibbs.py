@@ -4,7 +4,7 @@ import jax.random as jr
 from functools import partial
 
 from jax_moseq.utils.kalman import kalman_sample
-from jax_moseq.utils.distributions import sample_vonmises_fisher
+from jax_moseq.utils.distributions import sample_vonmises, sample_vonmises_fisher
 
 from jax_moseq.models import arhmm, slds
 from jax_moseq.models.keypoint_slds.alignment import (
@@ -248,9 +248,11 @@ def resample_heading(seed, Y, x, v, s, Cd, sigmasq, **kwargs):
     kappa_sin = S[..., 0, 1] - S[..., 1, 0]
     del S
 
-    mean_direction = jnp.stack([kappa_cos, kappa_sin], axis=-1)
-    sampled_direction = sample_vonmises_fisher(seed, mean_direction)
-    h = vector_to_angle(sampled_direction)
+    # The angle of a von Mises-Fisher draw on the circle is von Mises
+    # distributed, and TFP's VonMises samples it much faster on CPU.
+    mean_angle = jnp.arctan2(kappa_sin, kappa_cos)
+    concentration = jnp.sqrt(kappa_cos**2 + kappa_sin**2)
+    h = sample_vonmises(seed, mean_angle, concentration)
     return h
 
 
