@@ -333,7 +333,11 @@ def resample_location(
     Q = jnp.eye(d)[na] * sigmasq_loc
     C = jnp.eye(d)
     D = jnp.zeros(d)
-    R = jnp.repeat(gammasq, d, axis=-1)
+    # Observation noise as diagonal matrices rather than diagonal entries:
+    # dynamax's update for diagonal entries cancels catastrophically in
+    # float32 at each segment's first frame, where the prior variance (1e4)
+    # dwarfs gammasq, and can give a negative filtered variance.
+    R = gammasq[..., na] * jnp.eye(d, dtype=gammasq.dtype)
     zz = jnp.zeros_like(mask[:, 1:], dtype=int)
 
     masked_dynamics_noise = sigmasq_loc * 10
@@ -345,7 +349,7 @@ def resample_location(
         "cov": jnp.eye(d) * masked_dynamics_noise,
     }
 
-    masked_obs_noise_diag = jnp.ones(d) * masked_obs_noise
+    masked_obs_noise_cov = jnp.eye(d, dtype=sigmasq.dtype) * masked_obs_noise
 
     in_axes = (0, 0, 0, 0, na, na, na, na, na, na, na, 0, na, na)
     v = jax.vmap(partial(kalman_sample, parallel=parallel_message_passing), in_axes)(
@@ -362,7 +366,7 @@ def resample_location(
         D,
         R,
         masked_dynamics_params,
-        masked_obs_noise_diag,
+        masked_obs_noise_cov,
     )
     return v
 

@@ -65,15 +65,20 @@ def kalman_sample(
         Observation transform matrix
     D: jax.Array with shape (obs_dim,)
         Observation input matrix
-    Rs: jax.Array with shape (T, obs_dim)
-        Observation noise scales (diagonal entries of covariance)
+    Rs: jax.Array with shape (T, obs_dim) or (T, obs_dim, obs_dim)
+        Observation noise covariances, as their diagonal entries or as full
+        matrices. Dynamax updates diagonal entries with the Woodbury
+        identity, which loses precision in float32 when the predicted state
+        variance is much larger than the observation noise; full matrices
+        use its standard update.
     masked_dynamics_params: dict with key-value pairs
         - weights: jax.Array with shape (ar_dim, ar_dim)
         - bias: jax.Array with shape (ar_dim,)
         - cov: jax.Array with shape (ar_dim, ar_dim)
         Dynamics parameters, for masked timesteps
-    masked_obs_noise: jax.Array with shape (obs_dim,)
-        Diagonal observation noise scale, for masked timesteps.
+    masked_obs_noise: jax.Array with shape (obs_dim,) or (obs_dim, obs_dim)
+        Observation noise covariance for masked timesteps, in the same form
+        as ``Rs``.
     jitter : float, default=0
         Amount to boost the diagonal of the covariance matrix
         during backward-sampling of the continuous states.
@@ -87,7 +92,7 @@ def kalman_sample(
         Sampled continuous state sequence.
     """
 
-    n_states, _, ar_dim, obs_dim = *A.shape, Rs.shape[-1]
+    n_states, _, ar_dim, obs_dim = *A.shape, Rs.shape[1]
     initial_params = ParamsLGSSMInitial(mean=m0, cov=S0)
 
     A_and_mask = jnp.concatenate((A, masked_dynamics_params["weights"][na]))
@@ -106,7 +111,7 @@ def kalman_sample(
         weights=C,
         bias=D,
         input_weights=jnp.zeros((obs_dim, 0)),
-        cov=jnp.where(mask[:, None], Rs, masked_obs_noise),
+        cov=jnp.where(mask.reshape(-1, *[1] * (Rs.ndim - 1)), Rs, masked_obs_noise),
     )
 
     params = ParamsLGSSM(

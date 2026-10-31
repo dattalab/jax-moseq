@@ -5,6 +5,10 @@
 - ``resample_model`` uses the Kalman sampler that ``parallel_message_passing``
   chooses for the location (v) step as well as the x step; without a choice,
   the x step is sequential and the location step parallel.
+- The location step stays finite in float32 at each segment's first frame,
+  where its vague prior (variance 1e4) meets an observation variance below 2,
+  for either Kalman sampler. ``kalman_sample`` takes the observation noise as
+  diagonal entries or as diagonal matrices, with the same draws in float64.
 - The heading (h) step draws each frame's angle from its von Mises
   conditional: the draws' probability integral transform is uniform, at low
   concentrations and at those of real data.
@@ -31,6 +35,7 @@ from jax_moseq.models.keypoint_slds.alignment import (  # noqa: E402
     estimate_aligned,
     to_vanilla_slds,
 )
+from jax_moseq.utils.kalman import kalman_sample  # noqa: E402
 
 na = jnp.newaxis
 
@@ -163,6 +168,68 @@ def test_location_step_runs_either_sampler(data, model, parallel):
     )
     assert v.shape == (N_SEGMENTS, T, 2)
     assert np.isfinite(v).all()
+
+
+def float32_location_inputs():
+    """Twelve one-keypoint-cloud segments whose location-step observation
+    variances (gammasq) run from 0.2 to 1.9, as at full scale. With the
+    noise given to dynamax as diagonal entries, float32 cancellation at t = 0
+    makes the filtered variance negative in half of them on CPU."""
+    k, d, latent_dim, t = 4, 2, 3, 20
+    gammasq = np.linspace(0.2, 1.9, 12)
+    n = len(gammasq)
+    rng = np.random.default_rng(0)
+    Y = 0.3 * rng.standard_normal((n, t, 1, d)).cumsum(1) + 0.1 * rng.standard_normal((n, t, k, d))
+    s = np.broadcast_to(gammasq[:, None, None], (n, t, k))
+    f32 = jnp.float32
+    return {
+        "Y": jnp.asarray(Y, f32),
+        "mask": jnp.ones((n, t), f32),
+        "x": jnp.zeros((n, t, latent_dim), f32),
+        "h": jnp.zeros((n, t), f32),
+        "s": jnp.asarray(s, f32),
+        "Cd": jnp.zeros(((k - 1) * d, latent_dim + 1), f32),
+        "sigmasq": jnp.full(k, float(k), f32),
+        "sigmasq_loc": jnp.asarray(0.84, f32),
+    }
+
+
+@pytest.mark.parametrize("parallel", [False, True])
+def test_location_step_is_finite_in_float32_from_its_vague_prior(parallel):
+    with jax.enable_x64(False):
+        v = gibbs.resample_location(
+            jr.PRNGKey(0), **float32_location_inputs(), parallel_message_passing=parallel
+        )
+    assert v.dtype == jnp.float32
+    assert np.isfinite(v).all()
+
+
+@pytest.mark.parametrize("parallel", [False, True])
+def test_kalman_sample_takes_diagonal_or_dense_observation_noise(parallel):
+    """Same seed, observation noise as (T, 2) diagonal entries or (T, 2, 2)
+    diagonal matrices, with masked frames: the float64 draws agree to within
+    the diagonal form's own rounding at the first frames (about 3e-6 at
+    t = 0 from a prior variance of 1e4, under 1e-7 from t = 10)."""
+    t, d = 50, 2
+    rng = np.random.default_rng(1)
+    ys = jnp.asarray(rng.standard_normal((t, d)).cumsum(0))
+    mask = jnp.ones(t).at[30:40].set(0)
+    R = jnp.asarray(rng.uniform(0.2, 2.0, (t, d)))
+    eye = jnp.eye(d)
+    masked_dynamics = {"weights": eye, "bias": jnp.zeros(d), "cov": eye * 5.0}
+    args = (jnp.zeros(d), eye * 1e4, eye[na], jnp.zeros(d)[na], eye[na] * 0.5, eye, jnp.zeros(d))
+
+    def draw(Rs, masked_obs_noise):
+        return kalman_sample(
+            jr.PRNGKey(3), ys, mask, jnp.zeros(t - 1, int), *args, Rs,
+            masked_dynamics, masked_obs_noise, parallel=parallel,
+        )
+
+    diagonal = draw(R, jnp.full(d, 40.0))
+    dense = draw(R[..., na] * eye, eye * 40.0)
+    assert dense.dtype == jnp.float64
+    np.testing.assert_allclose(dense, diagonal, rtol=0, atol=1e-5)
+    np.testing.assert_allclose(dense[10:], diagonal[10:], rtol=0, atol=1e-7)
 
 
 @pytest.mark.parametrize("noise_scale", [1.0, 0.01])
