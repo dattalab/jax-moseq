@@ -3,7 +3,8 @@
 - The continuous-state (x) step compiles as one program, so XLA's
   compile-time memory analysis covers it (#287), for either Kalman sampler.
 - ``resample_model`` uses the Kalman sampler that ``parallel_message_passing``
-  chooses for the location (v) step as well as the x step.
+  chooses for the location (v) step as well as the x step; without a choice,
+  the x step is sequential and the location step parallel.
 - The heading (h) step draws each frame's angle from its von Mises
   conditional: the draws' probability integral transform is uniform, at low
   concentrations and at those of real data.
@@ -130,6 +131,27 @@ def test_resample_model_passes_sampler_choice_to_location_step(
     monkeypatch.setattr(gibbs, "resample_location", location_step)
     keypoint_slds.resample_model(data, **model, parallel_message_passing=parallel)
     assert calls == [parallel]
+
+
+def test_resample_model_without_sampler_choice_keeps_location_on_parallel(
+    monkeypatch, data, model
+):
+    """Without parallel_message_passing, the x step uses the sequential
+    sampler and the location step the parallel one."""
+    calls = {}
+
+    def x_step(*args, **kwargs):
+        calls["x"] = kwargs.get("parallel_message_passing", "not passed")
+        return kwargs["x"]
+
+    def location_step(*args, **kwargs):
+        calls["v"] = kwargs.get("parallel_message_passing", "not passed")
+        return kwargs["v"]
+
+    monkeypatch.setattr(gibbs, "resample_continuous_stateseqs", x_step)
+    monkeypatch.setattr(gibbs, "resample_location", location_step)
+    keypoint_slds.resample_model(data, **model)
+    assert calls == {"x": False, "v": True}
 
 
 @pytest.mark.parametrize("parallel", [False, True])

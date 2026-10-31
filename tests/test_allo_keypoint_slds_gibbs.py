@@ -112,6 +112,38 @@ def test_resample_model_passes_sampler_choice_to_location_step(
     assert calls == ([parallel] if uses_location_step else [])
 
 
+@pytest.mark.parametrize("ignore_allo", [True, False], ids=["ignore_allo", "allo"])
+def test_resample_model_without_sampler_choice_keeps_location_on_parallel(
+    monkeypatch, data_and_model, ignore_allo
+):
+    """Without parallel_message_passing, the x step uses the sequential
+    sampler and the location step the parallel one."""
+    data, model = data_and_model
+    x_calls, location_calls = [], []
+
+    def x_step(*args, **kwargs):
+        x_calls.append(kwargs.get("parallel_message_passing", "not passed"))
+        return kwargs["x"]
+
+    def location_step(*args, **kwargs):
+        location_calls.append(kwargs.get("parallel_message_passing", "not passed"))
+        Y = kwargs["Y"] if "Y" in kwargs else args[1]
+        return jnp.zeros(Y.shape[:-2] + Y.shape[-1:])
+
+    monkeypatch.setattr(keypoint_slds, "resample_continuous_stateseqs", x_step)
+    monkeypatch.setattr(keypoint_slds, "resample_location", location_step)
+    gibbs.resample_heading_and_centroid.clear_cache()
+    try:
+        allo_keypoint_slds.resample_model(
+            data, **model, ignore_allo_dynamics_for_location_sampling=ignore_allo
+        )
+    finally:
+        gibbs.resample_heading_and_centroid.clear_cache()
+    uses_location_step = ignore_allo or data["Y"].shape[-1] == 3
+    assert x_calls == [False]
+    assert location_calls == ([True] if uses_location_step else [])
+
+
 def test_resample_discrete_stateseqs_draws_as_per_state_computation(data_and_model):
     """The states drawn from TFP's per-state AR log likelihoods plus the
     heading and centroid log likelihoods, one key per segment, as jax-moseq

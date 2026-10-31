@@ -381,7 +381,7 @@ def resample_model(
     fix_heading=False,
     verbose=False,
     jitter=1e-3,
-    parallel_message_passing=False,
+    parallel_message_passing=None,
     **kwargs
 ):
     """
@@ -417,10 +417,12 @@ def resample_model(
         during backward-sampling of the continuous states.
     verbose : bool, default=False
         Whether to print progress info during resampling.
-    parallel_message_passing : bool, default=False
+    parallel_message_passing : bool, optional
         Use associative scan for the Kalman sampling of the continuous
         states and the centroid, which is faster on a GPU but has a
-        significantly longer jit time.
+        significantly longer jit time. If not given, the continuous
+        states use the sequential sampler and the centroid the
+        associative scan.
 
     Returns
     ------
@@ -428,6 +430,10 @@ def resample_model(
         Dictionary containing the hyperparameters and
         updated seed, states, and parameters of the model.
     """
+    # Without an explicit choice, the continuous states use the sequential
+    # Kalman sampler and the centroid the parallel one.
+    parallel_x = bool(parallel_message_passing)
+    parallel_v = True if parallel_message_passing is None else parallel_message_passing
     model = arhmm.resample_model(
         data, seed, states, params, hypparams, states_only, verbose=verbose
     )
@@ -459,7 +465,7 @@ def resample_model(
         **states,
         **params,
         jitter=jitter,
-        parallel_message_passing=parallel_message_passing
+        parallel_message_passing=parallel_x
     )
 
     if not fix_heading:
@@ -475,7 +481,7 @@ def resample_model(
         **states,
         **params,
         **hypparams["cen_hypparams"],
-        parallel_message_passing=parallel_message_passing
+        parallel_message_passing=parallel_v
     )
 
     if resample_local_noise_scale:
