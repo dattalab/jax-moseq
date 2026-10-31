@@ -9,7 +9,87 @@ na = jnp.newaxis
 
 
 def sample_vonmises(seed, theta, kappa):
-    return tfd.VonMises(theta, kappa).sample(seed=seed)
+    """Sample angles from von Mises distributions.
+
+    Best and Fisher's rejection sampler, with a wrapped Cauchy proposal,
+    computed so that the draws stay finite and accurate in float32 at any
+    concentration.
+
+    Parameters
+    ----------
+    seed: jax.random.PRNGKey
+        Random seed
+    theta: jax array
+        Mean angles
+    kappa: jax array
+        Concentrations (non-negative), broadcastable with ``theta``; a
+        concentration of 0 gives uniform angles
+
+    Returns
+    -------
+    angles: jax array
+        Angles in [-pi, pi], in the broadcast shape of ``theta`` and
+        ``kappa`` and their floating-point dtype
+    """
+    dtype = jnp.result_type(theta, kappa, float)
+    theta = jnp.asarray(theta, dtype)
+    kappa = jnp.asarray(kappa, dtype)
+    shape = jnp.broadcast_shapes(theta.shape, kappa.shape)
+    deviation, _ = _sample_vonmises_deviation(seed, jnp.broadcast_to(kappa, shape))
+    angles = theta + deviation
+    two_pi = jnp.asarray(2 * jnp.pi, dtype)
+    return angles - two_pi * jnp.round(angles / two_pi)
+
+
+def _sample_vonmises_deviation(seed, kappa, max_passes=100):
+    """Von Mises angles about a mean of 0, and the number of rejection
+    passes they took.
+
+    Each pass draws a proposal for every element that has none accepted,
+    and passes repeat until every element has one. Best and Fisher's
+    proposal is the angle whose cosine is w = (1 + s z) / (s + z), with
+    z = cos(pi u) for u uniform on [-1, 1) and s = (1 + rho^2) / (2 rho),
+    and it is accepted when v < y exp(1 - y), for v uniform on [0, 1) and
+    y = kappa (s - w). At large concentrations s and w are within float32
+    rounding of 1, so neither is formed: c = kappa (s - 1), y and the angle
+    are computed in forms without cancellation.
+    """
+    dtype = kappa.dtype
+    zero, one = jnp.zeros((), dtype), jnp.ones((), dtype)
+    half_pi = jnp.asarray(jnp.pi / 2, dtype)
+    # With q = sqrt(1 + 4 kappa^2) and r = 1 + q, rho = 2 kappa / d for
+    # d = r + sqrt(2 r), and 1 - rho = (d - 2 kappa) / d, where
+    # d - 2 kappa = 1 + 1 / (q + 2 kappa) + sqrt(2 r). Then
+    # c = kappa (s - 1) = kappa (1 - rho)^2 / (2 rho) = (1 - rho)^2 d / 4.
+    q = jnp.hypot(one, 2 * kappa)
+    r = 1 + q
+    d = r + jnp.sqrt(2 * r)
+    one_minus_rho = (1 + 1 / (q + 2 * kappa) + jnp.sqrt(2 * r)) / d
+    c = one_minus_rho**2 * d / 4
+
+    def cond(carry):
+        i, done, _ = carry
+        return (i < max_passes) & ~done.all()
+
+    def body(carry):
+        i, done, u = carry
+        u_seed, v_seed = jr.split(jr.fold_in(seed, i))
+        proposal = jr.uniform(u_seed, kappa.shape, dtype, minval=-one, maxval=one)
+        v = jr.uniform(v_seed, kappa.shape, dtype, minval=zero, maxval=one)
+        # kappa (s - w) = kappa (s^2 - 1) / (s + z), where
+        # kappa (s + z) = c + 2 kappa cos(pi u / 2)^2
+        y = c * (c + 2 * kappa) / (c + 2 * kappa * jnp.cos(half_pi * proposal) ** 2)
+        accept = v < y * jnp.exp(1 - y)
+        return i + 1, done | accept, jnp.where(done, u, proposal)
+
+    init = (jnp.zeros((), jnp.int32), jnp.zeros(kappa.shape, bool), jnp.zeros(kappa.shape, dtype))
+    num_passes, _, u = lax.while_loop(cond, body, init)
+
+    # sign(u) acos(w), from tan(acos(w) / 2) = sqrt((1 - w) / (1 + w))
+    # = sqrt(c / (c + 2 kappa)) |tan(pi u / 2)|
+    a = half_pi * u
+    deviation = 2 * jnp.arctan2(jnp.sqrt(c) * jnp.sin(a), jnp.sqrt(c + 2 * kappa) * jnp.cos(a))
+    return deviation, num_passes
 
 
 def sample_vonmises_fisher(seed, direction):

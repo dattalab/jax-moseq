@@ -258,7 +258,7 @@ def resample_heading(seed, Y, x, v, s, Cd, sigmasq, **kwargs):
     del S
 
     # The angle of a von Mises-Fisher draw on the circle is von Mises
-    # distributed, and TFP's VonMises samples it much faster on CPU.
+    # distributed, with the mean direction's angle and length.
     mean_angle = jnp.arctan2(kappa_sin, kappa_cos)
     concentration = jnp.sqrt(kappa_cos**2 + kappa_sin**2)
     h = sample_vonmises(seed, mean_angle, concentration)
