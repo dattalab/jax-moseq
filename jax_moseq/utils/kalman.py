@@ -5,20 +5,32 @@ from jax import lax
 from functools import partial
 
 from dynamax.linear_gaussian_ssm.parallel_inference import (
-    lgssm_posterior_sample as parallel_lgssm_sample,
+    lgssm_filter as parallel_lgssm_filter,
+    _get_one_param,
 )
 from dynamax.linear_gaussian_ssm.inference import (
-    lgssm_posterior_sample as serial_lgssm_sample,
+    lgssm_filter as serial_lgssm_filter,
     _condition_on,
+    _get_params,
     ParamsLGSSM,
     ParamsLGSSMInitial,
     ParamsLGSSMDynamics,
     ParamsLGSSMEmissions,
 )
 
+from dynamax.utils.utils import psd_solve, symmetrize
+from jax.scipy.linalg import cho_factor, cho_solve
+from tensorflow_probability.substrates.jax.distributions import (
+    MultivariateNormalFullCovariance as MVN,
+)
+
 from jax_moseq.utils.autoregression import get_nlags
 
 na = jnp.newaxis
+
+# observation noise given to dynamax for the first frame, once
+# ``kalman_sample`` has conditioned the initial distribution on it
+FIRST_FRAME_NOISE = 1e10
 
 
 def kalman_sample(
@@ -41,6 +53,23 @@ def kalman_sample(
 ):
     """Run forward-filtering and backward-sampling to draw samples from posterior
     of a 1st-order dynamic system.
+
+    The filter is dynamax's. When the observation noise is given as diagonal
+    entries, the initial distribution is first conditioned on the first frame
+    here, with the standard (dense) update, and dynamax receives that
+    distribution as the initial one and a noise of ``FIRST_FRAME_NOISE`` for
+    the first frame, so its own update there is negligible. Dynamax's update for diagonal entries uses the
+    Woodbury identity, which loses precision when the predicted state
+    variance is much larger than the observation noise, as at a vague
+    initial distribution; in float32 it can leave the first filtered
+    covariance indefinite.
+
+    Both samplers are dynamax's, except that the covariance of each frame's
+    state given the next one's is computed in Joseph form,
+    (I - E F) P (I - E F)^T + E Q E^T, a sum of positive semi-definite
+    terms, rather than as P - E F P, a difference that float32 does not
+    resolve when the dynamics noise Q is near-singular
+    (:py:func:`parallel_lgssm_sample`, :py:func:`serial_lgssm_sample`).
 
     Parameters
     ----------
@@ -70,7 +99,8 @@ def kalman_sample(
         matrices. Dynamax updates diagonal entries with the Woodbury
         identity, which loses precision in float32 when the predicted state
         variance is much larger than the observation noise; full matrices
-        use its standard update.
+        use its standard update. With diagonal entries the first frame is
+        conditioned on with the standard update (see above).
     masked_dynamics_params: dict with key-value pairs
         - weights: jax.Array with shape (ar_dim, ar_dim)
         - bias: jax.Array with shape (ar_dim,)
@@ -81,7 +111,8 @@ def kalman_sample(
         as ``Rs``.
     jitter : float, default=0
         Amount to boost the diagonal of the covariance matrix
-        during backward-sampling of the continuous states.
+        during backward-sampling of the continuous states, with the
+        sequential sampler.
     parallel : bool, default=True,
         Use associative scan for Kalman sampling, which is faster on
         a GPU but has a significantly longer jit time.
@@ -107,11 +138,24 @@ def kalman_sample(
         input_weights=jnp.zeros((ar_dim, 0)),
     )
 
+    emission_cov = jnp.where(mask.reshape(-1, *[1] * (Rs.ndim - 1)), Rs, masked_obs_noise)
+    if Rs.ndim == 2:
+        # condition on the first frame with the dense update; C and D may
+        # carry a leading axis that dynamax reads as time
+        C_0 = C[0] if C.ndim == 3 else C
+        D_0 = D[0] if D.ndim == 2 else D
+        m0, S0 = _condition_on(
+            m0, S0, C_0, jnp.zeros((obs_dim, 0), ys.dtype), D_0,
+            jnp.diag(emission_cov[0]), jnp.zeros(0, ys.dtype), ys[0],
+        )
+        initial_params = ParamsLGSSMInitial(mean=m0, cov=S0)
+        emission_cov = emission_cov.at[0].set(FIRST_FRAME_NOISE)
+
     emissions_params = ParamsLGSSMEmissions(
         weights=C,
         bias=D,
         input_weights=jnp.zeros((obs_dim, 0)),
-        cov=jnp.where(mask.reshape(-1, *[1] * (Rs.ndim - 1)), Rs, masked_obs_noise),
+        cov=emission_cov,
     )
 
     params = ParamsLGSSM(
@@ -124,6 +168,123 @@ def kalman_sample(
         return parallel_lgssm_sample(seed, params, ys)
     else:
         return serial_lgssm_sample(seed, params, ys, jitter=jitter)
+
+
+def parallel_lgssm_sample(key, params, emissions):
+    """Draw a sample of the latent states with dynamax's parallel sampler,
+    computing the covariance of each state given the next in Joseph form.
+
+    Dynamax's ``parallel_inference.lgssm_posterior_sample`` (Särkkä and
+    García-Fernández, 2021) samples each state given the next from
+    N(E_t x_{t+1} + g_t, L_t), with E_t = P_t F^T (F P_t F^T + Q)^-1, and
+    combines the draws with an associative scan. It computes L_t as
+    P_t - E_t F P_t. Here L_t is (I - E_t F) P_t (I - E_t F)^T
+    + E_t Q E_t^T, which is the same matrix in exact arithmetic and positive
+    semi-definite by construction in floating point; the rest is dynamax's.
+
+    Parameters
+    ----------
+    key: jr.PRNGKey
+        Random seed.
+    params: dynamax ParamsLGSSM
+        Model parameters, with no inputs.
+    emissions: jax.Array with shape (T, obs_dim)
+        Observations.
+
+    Returns
+    -------
+    xs: jax.Array with shape (T, state_dim)
+        Sampled latent states.
+    """
+    filtered = parallel_lgssm_filter(params, emissions)
+    means, covs = filtered.filtered_means, filtered.filtered_covariances
+
+    @jax.vmap
+    def message(m, P, t):
+        F = _get_one_param(params.dynamics.weights, 2, t)
+        b = _get_one_param(params.dynamics.bias, 1, t)
+        Q = _get_one_param(params.dynamics.cov, 2, t)
+        CF, low = cho_factor(F @ P @ F.T + Q)
+        E = cho_solve((CF, low), F @ P).T
+        g = m - E @ (F @ m + b)
+        I_EF = jnp.eye(P.shape[-1], dtype=P.dtype) - E @ F
+        L = symmetrize(I_EF @ P @ I_EF.T + E @ Q @ E.T)
+        return E, g, L
+
+    E, g, L = message(means[:-1], covs[:-1], jnp.arange(len(emissions) - 1))
+    E = jnp.concatenate([E, jnp.zeros_like(covs[-1:])])
+    g = jnp.concatenate([g, means[-1:]])
+    L = jnp.concatenate([L, covs[-1:]])
+    h = MVN(g, L).sample(seed=key)
+
+    @jax.vmap
+    def operator(elem1, elem2):
+        E1, h1 = elem1
+        E2, h2 = elem2
+        return E2 @ E1, E2 @ h1 + h2
+
+    _, samples = lax.associative_scan(operator, (E, h), reverse=True)
+    return samples
+
+
+def serial_lgssm_sample(key, params, emissions, jitter=0.0):
+    """Draw a sample of the latent states with dynamax's sequential sampler,
+    computing the covariance of each state given the next in Joseph form.
+
+    Dynamax's ``inference.lgssm_posterior_sample`` runs the Kalman filter,
+    then samples backward in time each state given the next from
+    N(m_t + E_t (x_{t+1} - F m_t - b), L_t), with
+    E_t = P_t F^T (F P_t F^T + Q)^-1, plus ``jitter`` on the diagonal of L_t.
+    It computes L_t as P_t - E_t (F P_t F^T + Q) E_t^T. Here L_t is
+    (I - E_t F) P_t (I - E_t F)^T + E_t Q E_t^T, which is the same matrix in
+    exact arithmetic and positive semi-definite by construction in floating
+    point; the rest is dynamax's.
+
+    Parameters
+    ----------
+    key: jr.PRNGKey
+        Random seed.
+    params: dynamax ParamsLGSSM
+        Model parameters, with no inputs.
+    emissions: jax.Array with shape (T, obs_dim)
+        Observations.
+    jitter: float, default=0
+        Amount added to the diagonal of each backward covariance.
+
+    Returns
+    -------
+    xs: jax.Array with shape (T, state_dim)
+        Sampled latent states.
+    """
+    num_timesteps = len(emissions)
+    filtered = serial_lgssm_filter(params, emissions)
+    means, covs = filtered.filtered_means, filtered.filtered_covariances
+
+    def step(next_state, args):
+        key, m, P, t = args
+        F, _, b, Q = _get_params(params, num_timesteps, t)[:4]
+        E = psd_solve(Q + F @ P @ F.T, F @ P).T
+        mean = m + E @ (next_state - b - F @ m)
+        I_EF = jnp.eye(P.shape[-1], dtype=P.dtype) - E @ F
+        cov = symmetrize(I_EF @ P @ I_EF.T + E @ Q @ E.T)
+        cov = cov + jnp.eye(cov.shape[-1]) * jitter
+        state = MVN(mean, cov).sample(seed=key)
+        return state, state
+
+    key, this_key = jr.split(key, 2)
+    last_state = MVN(means[-1], covs[-1]).sample(seed=this_key)
+    _, states = lax.scan(
+        step,
+        last_state,
+        (
+            jr.split(key, num_timesteps - 1),
+            means[:-1],
+            covs[:-1],
+            jnp.arange(num_timesteps - 1),
+        ),
+        reverse=True,
+    )
+    return jnp.vstack([states, last_state])
 
 
 def ar_to_lds_emissions(Cd, R, y, m0, S0, nlags):

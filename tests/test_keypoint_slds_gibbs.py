@@ -9,6 +9,11 @@
   where its vague prior (variance 1e4) meets an observation variance below 2,
   for either Kalman sampler. ``kalman_sample`` takes the observation noise as
   diagonal entries or as diagonal matrices, with the same draws in float64.
+- The x step stays finite in float32 at a large pixel scale, where the
+  first frame of each segment meets a prior variance far above the
+  observation noise, for either Kalman sampler; and when an AR state's
+  noise covariance is near-singular, with the parallel sampler and with the
+  sequential one without jitter.
 - The heading (h) step draws each frame's angle from its von Mises
   conditional: the draws' probability integral transform is uniform, at low
   concentrations and at those of real data.
@@ -286,3 +291,77 @@ def test_scale_draws_follow_the_gamma_conditional(data, model):
     # the check detects a shape parameter 10% too large
     wrong = stats.gamma.cdf(g, 1.1 * a)
     assert stats.kstest(wrong.ravel(), "uniform").pvalue < 1e-6
+
+
+def ar_params_for_x_step(num_states, latent_dim, nlags, Q):
+    A = np.zeros((num_states, latent_dim, latent_dim * nlags))
+    A[:, :, -latent_dim:] = 0.95 * np.eye(latent_dim)
+    return np.concatenate([A, np.zeros((num_states, latent_dim, 1))], -1), Q
+
+
+def float32_x_step(inputs, parallel, jitter=1e-3):
+    with jax.enable_x64(False):
+        f32 = {k: jnp.asarray(v, jnp.int32 if k == "z" else jnp.float32) for k, v in inputs.items()}
+        x = slds.resample_continuous_stateseqs(
+            jr.PRNGKey(0), **f32, jitter=jitter, parallel_message_passing=parallel
+        )
+    assert x.dtype == jnp.float32
+    return np.asarray(x)
+
+
+def large_pixel_scale_x_inputs():
+    """24 segments of 40 frames whose emission matrix is large against the
+    observation noise, as at three times the test data's pixel scale: the
+    first frame's cancellation factor 1 + 10 lambda_max(H' R^-1 H) runs from
+    about 1,300 to 7,500. With the noise given to dynamax as diagonal
+    entries, its Woodbury update at each segment's first frame leaves the
+    float32 filtered covariance indefinite in about 10 of them on CPU."""
+    n, t, latent_dim, nlags, obs_dim = 24, 40, 4, 3, 16
+    rng = np.random.default_rng(0)
+    Cd = np.concatenate(
+        [8 * rng.standard_normal((obs_dim, latent_dim)), 5 * rng.standard_normal((obs_dim, 1))], 1
+    )
+    x = 0.3 * rng.standard_normal((n, t, latent_dim)).cumsum(1)
+    sigmasq = np.full(obs_dim, 4.0)
+    s = np.broadcast_to(np.geomspace(0.5, 3.0, n)[:, None, None], (n, t, obs_dim)).copy()
+    y = x @ Cd[:, :-1].T + Cd[:, -1] + np.sqrt(sigmasq * s) * rng.standard_normal((n, t, obs_dim))
+    Ab, Q = ar_params_for_x_step(3, latent_dim, nlags, np.tile(0.1 * np.eye(latent_dim), (3, 1, 1)))
+    z = rng.integers(0, 3, (n, t - nlags))
+    return dict(y=y, mask=np.ones((n, t)), z=z, s=s, Ab=Ab, Q=Q, Cd=Cd, sigmasq=sigmasq)
+
+
+@pytest.mark.parametrize("parallel", [False, True])
+def test_x_step_is_finite_in_float32_at_a_large_pixel_scale(parallel):
+    assert np.isfinite(float32_x_step(large_pixel_scale_x_inputs(), parallel)).all()
+
+
+def near_singular_q_x_inputs():
+    """Eight 200-frame segments, half of whose frames are in a state whose AR
+    noise covariance has smallest eigenvalue 2e-7, with filtered covariances
+    of entries up to 10. The covariance of each frame given the next, L =
+    P - E F P, has smallest eigenvalue about 2e-7 there, which a float32
+    subtraction of those entries does not resolve."""
+    n, t, latent_dim, nlags, obs_dim = 8, 200, 4, 3, 16
+    rng = np.random.default_rng(1)
+    Cd = np.concatenate(
+        [rng.standard_normal((obs_dim, latent_dim)), rng.standard_normal((obs_dim, 1))], 1
+    )
+    V = np.linalg.qr(rng.standard_normal((latent_dim, latent_dim)))[0]
+    Q_small = V @ np.diag(np.geomspace(2e-7, 10.0, latent_dim)) @ V.T
+    Q = np.stack([0.1 * np.eye(latent_dim), Q_small])
+    Ab, Q = ar_params_for_x_step(2, latent_dim, nlags, Q)
+    z = (rng.random((n, t - nlags)) < 0.5).astype(int)
+    x = 3 * rng.standard_normal((n, t, latent_dim)).cumsum(1) / np.sqrt(t)
+    y = x @ Cd[:, :-1].T + Cd[:, -1] + rng.standard_normal((n, t, obs_dim))
+    return dict(
+        y=y, mask=np.ones((n, t)), z=z, s=np.ones((n, t, obs_dim)), Ab=Ab, Q=Q, Cd=Cd,
+        sigmasq=np.ones(obs_dim),
+    )
+
+
+@pytest.mark.parametrize("parallel, jitter", [(True, 1e-3), (False, 0.0)])
+def test_x_step_is_finite_in_float32_with_a_near_singular_q(parallel, jitter):
+    """The parallel sampler adds no jitter; the sequential one is run
+    without its jitter, which would otherwise cover the error."""
+    x = float32_x_step(near_singular_q_x_inputs(), parallel, jitter)
+    assert np.isfinite(x).all()
