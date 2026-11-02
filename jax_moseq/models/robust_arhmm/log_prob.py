@@ -271,8 +271,7 @@ def marginal_log_likelihood(mask, x, Ab, Q, pi, nu, **kwargs):
     (:py:func:`jax_moseq.utils.distributions.hmm_marginal_log_likelihood`,
     in log space for float32). That arithmetic raises small probabilities to
     1e-15, which makes it deviate from the exact marginal likelihood at
-    high state counts, as recorded in
-    ``docs/2026-08-06_sampler_audit/differences.md``.
+    high state counts.
 
     Returns
     -------
