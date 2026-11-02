@@ -4,7 +4,7 @@ import numpy as np
 from functools import partial
 from jax.scipy.linalg import solve_triangular
 from jax.scipy.special import gammaln
-from dynamax.hidden_markov_model.inference import hmm_filter
+from jax_moseq.utils.distributions import hmm_marginal_log_likelihood
 
 from jax_moseq.utils.autoregression import apply_ar_params, get_nlags
 from jax_moseq.models.arhmm.log_prob import discrete_stateseq_log_prob
@@ -267,11 +267,12 @@ def marginal_log_likelihood(mask, x, Ab, Q, pi, nu, **kwargs):
     """Marginal log likelihood of the latents, with ``z`` summed out.
 
     Mirrors ``jax_moseq.models.arhmm.log_prob.marginal_log_likelihood``,
-    including its use of ``dynamax``'s forward filter. That filter has a known
-    deviation from the exact conditional at high state counts, recorded in
-    ``docs/2026-08-06_sampler_audit/differences.md``; matching the Gaussian
-    version matters more here than avoiding it, and both will be corrected
-    together.
+    including its use of dynamax's forward-filter arithmetic
+    (:py:func:`jax_moseq.utils.distributions.hmm_marginal_log_likelihood`,
+    in log space for float32). That arithmetic raises small probabilities to
+    1e-15, which makes it deviate from the exact marginal likelihood at
+    high state counts, as recorded in
+    ``docs/2026-08-06_sampler_audit/differences.md``.
 
     Returns
     -------
@@ -279,19 +280,15 @@ def marginal_log_likelihood(mask, x, Ab, Q, pi, nu, **kwargs):
         Marginal log likelihood.
     """
     nlags = get_nlags(Ab)
-    num_states = pi.shape[0]
 
-    initial_distribution = jnp.ones(num_states) / num_states
     log_likelihoods = jax.lax.map(
         partial(robust_ar_log_likelihood, x), (Ab, Q, nu)
     )
     log_likelihoods = jnp.moveaxis(log_likelihoods, 0, -1)
     masked_log_likelihoods = log_likelihoods * mask[:, nlags:, na]
 
-    get_mll = lambda ll: hmm_filter(
-        initial_distribution, pi, ll
-    ).marginal_loglik.sum()
-    # all segments at once: the filter keeps only a running total per
-    # segment, so mixed_map's passes would save no memory
+    get_mll = lambda ll: hmm_marginal_log_likelihood(pi, ll)
+    # all segments at once: the filter keeps at most one normalizer per
+    # frame, so mixed_map's passes would save little memory
     mlls = jax.vmap(get_mll)(masked_log_likelihoods)
     return mlls.sum()

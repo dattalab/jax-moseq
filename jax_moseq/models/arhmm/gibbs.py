@@ -2,10 +2,7 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 
-from dynamax.hidden_markov_model.inference import (
-    hmm_posterior_mode,
-    hmm_smoother,
-)
+from dynamax.hidden_markov_model.inference import hmm_posterior_mode
 
 from jax_moseq.utils import (
     pad_affine,
@@ -19,6 +16,7 @@ from jax_moseq.utils import convert_data_precision
 from jax_moseq.utils.distributions import (
     sample_mniw,
     hmm_sampler_uses_log_space,
+    hmm_smoothed_marginals,
     sample_hmm_stateseq,
     sample_hmm_stateseq_from_likelihoods,
     sample_hmm_stateseq_from_log_likelihoods,
@@ -127,15 +125,13 @@ def stateseq_marginals(x, mask, Ab, Q, pi, **kwargs):
         Marginal probability of each discrete state at each time step.
     """
     nlags = get_nlags(Ab)
-    num_states = pi.shape[0]
 
-    initial_distribution = jnp.ones(num_states) / num_states
     # one segment at a time, so only one segment's whitened residuals are
     # held at once
     log_likelihoods = jax.lax.map(lambda x: ar_log_likelihoods(x, Ab, Q), x)
     masked_log_likelihoods = log_likelihoods * mask[:, nlags:, na]
 
-    smoother = lambda lls: hmm_smoother(initial_distribution, pi, lls).smoothed_probs
+    smoother = lambda lls: hmm_smoothed_marginals(pi, lls)
     z_marginals = mixed_map(smoother)(masked_log_likelihoods)
     return z_marginals
 

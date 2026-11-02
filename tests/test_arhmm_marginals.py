@@ -5,9 +5,9 @@ frame, so they must equal the same smoother or filter run on TFP's per-state
 multivariate normal (``ar_log_likelihood``) to rounding, with masked frames
 contributing nothing.
 
-The marginal log likelihood's filter keeps only a running total per segment,
-so splitting the segments into ``mixed_map`` passes would save no memory and
-only add time: it runs all segments at once, whatever ``mixed_map_iters`` is.
+The marginal log likelihood's filter keeps at most one normalizer per frame,
+so splitting the segments into ``mixed_map`` passes would save little memory
+and only add time: it runs all segments at once, whatever ``mixed_map_iters`` is.
 """
 
 from functools import partial

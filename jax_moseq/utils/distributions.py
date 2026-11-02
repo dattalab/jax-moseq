@@ -3,6 +3,7 @@ import jax.numpy as jnp
 import jax.random as jr
 from jax import lax
 import tensorflow_probability.substrates.jax.distributions as tfd
+from dynamax.hidden_markov_model.inference import hmm_filter, hmm_smoother
 from jax_moseq.utils import convert_data_precision
 
 na = jnp.newaxis
@@ -165,16 +166,19 @@ def _choice(p, u):
 
 
 def hmm_sampler_uses_log_space(dtype):
-    """Whether the HMM state sampler runs in log space for this precision.
+    """Whether the HMM routines run in log space for this precision.
 
     The discrete-state samplers (:py:func:`sample_hmm_stateseq` and
-    ``resample_discrete_stateseqs``) choose their computation from the
-    precision of the log likelihoods: float32 runs in log space
-    (:py:func:`sample_hmm_stateseq_from_log_likelihoods`), because float32
-    probabilities underflow to zero where float64 ones are only floored;
-    every other precision runs on scaled probabilities
-    (:py:func:`sample_hmm_stateseq_from_likelihoods`). Both compute
-    dynamax's ``hmm_posterior_sample``.
+    ``resample_discrete_stateseqs``), the smoother
+    (:py:func:`hmm_smoothed_marginals`) and the marginal log likelihood
+    (:py:func:`hmm_marginal_log_likelihood`) choose their computation from
+    the precision of the log likelihoods: float32 runs in log space, because
+    float32 probabilities underflow to zero where float64 ones are only
+    floored; every other precision runs on probabilities, as dynamax does.
+    The sampler's two computations are
+    :py:func:`sample_hmm_stateseq_from_log_likelihoods` and
+    :py:func:`sample_hmm_stateseq_from_likelihoods`; both compute dynamax's
+    ``hmm_posterior_sample``.
 
     Parameters
     ----------
@@ -189,7 +193,7 @@ def hmm_sampler_uses_log_space(dtype):
     return jnp.dtype(dtype) == jnp.float32
 
 
-def _hmm_log_filter(log_transition_matrix, log_likelihoods, eps=1e-15):
+def _hmm_log_filter(log_transition_matrix, log_likelihoods, eps=1e-15, per_frame=False):
     """Forward filtering in log space with dynamax's normalization, uniform
     initial distribution.
 
@@ -210,11 +214,15 @@ def _hmm_log_filter(log_transition_matrix, log_likelihoods, eps=1e-15):
         Log likelihoods of emissions, zero at masked time steps
     eps: float, default=1e-15
         Smallest unnormalized probability of a possible state
+    per_frame: bool, default=False
+        Return each time step's log normalizer instead of their running
+        total
 
     Returns
     -------
-    log_norm: float
-        Marginal log likelihood
+    log_norm: float, or jax array of shape (num_timesteps,)
+        Marginal log likelihood, accumulated over the time steps in order;
+        with ``per_frame``, each time step's contribution to it
     log_filtered: jax array, shape (num_timesteps, num_states)
         Log filtered probabilities
     """
@@ -236,13 +244,125 @@ def _hmm_log_filter(log_transition_matrix, log_likelihoods, eps=1e-15):
         log_predicted = jax.nn.logsumexp(
             log_filtered[:, na] + log_transition_matrix, axis=0
         )
-        return (log_norm + log_c + ll_max[t], log_predicted, log_probs), None
+        frame_norm = log_c + ll_max[t] if per_frame else None
+        return (log_norm + log_c + ll_max[t], log_predicted, log_probs), frame_norm
 
     carry = (jnp.zeros((), dtype), log_initial, log_likelihoods)
-    (log_norm, _, log_filtered), _ = lax.scan(
+    (log_norm, _, log_filtered), frame_norms = lax.scan(
         forward, carry, jnp.arange(num_timesteps)
     )
-    return log_norm, log_filtered
+    return (frame_norms if per_frame else log_norm), log_filtered
+
+
+def hmm_marginal_log_likelihood(transition_matrix, log_likelihoods):
+    """Marginal log likelihood of one sequence of emissions under an HMM.
+
+    The log normalizers of dynamax's ``hmm_filter`` summed over time steps,
+    with a uniform initial distribution. The precision of the log
+    likelihoods selects the computation
+    (:py:func:`hmm_sampler_uses_log_space`). Every precision but float32
+    calls ``hmm_filter``. Float32 carries out the same arithmetic on log
+    probabilities (the forward pass of
+    :py:func:`sample_hmm_stateseq_from_log_likelihoods`): entries below
+    1e-15 are raised to 1e-15, as dynamax raises them, including entries
+    that would underflow to zero as float32 probabilities, and the
+    per-frame log normalizers are added with ``jnp.sum``. Where
+    ``hmm_filter`` in float32 would find every state's probability zero, the
+    float32 value is that of ``hmm_filter`` in float64, up to rounding, on
+    inputs where float64 probabilities do not underflow.
+
+    Parameters
+    ----------
+    transition_matrix: jax array, shape (num_states, num_states)
+        Transition matrix
+    log_likelihoods: jax array, shape (num_timesteps, num_states)
+        Log likelihoods of emissions given hidden state and parameters, set
+        to zero at masked time steps
+
+    Returns
+    -------
+    log_norm: float
+        Marginal log likelihood
+    """
+    num_states = transition_matrix.shape[0]
+    if hmm_sampler_uses_log_space(log_likelihoods.dtype):
+        log_transition_matrix = jnp.log(transition_matrix.astype(log_likelihoods.dtype))
+        frame_norms, _ = _hmm_log_filter(
+            log_transition_matrix, log_likelihoods, per_frame=True
+        )
+        return frame_norms.sum()
+    initial_distribution = jnp.ones(num_states) / num_states
+    return hmm_filter(initial_distribution, transition_matrix, log_likelihoods).marginal_loglik
+
+
+def hmm_smoothed_marginals(transition_matrix, log_likelihoods, threshold=1e-8):
+    """Marginal probability of each state at each time step of one sequence.
+
+    The smoothed probabilities of dynamax's ``hmm_smoother``, with a uniform
+    initial distribution. The precision of the log likelihoods selects the
+    computation (:py:func:`hmm_sampler_uses_log_space`). Every precision but
+    float32 calls ``hmm_smoother``. Float32 carries out the same arithmetic
+    on log probabilities: the forward pass of
+    :py:func:`hmm_marginal_log_likelihood`, then dynamax's backward pass,
+    in which each time step's filtered probabilities are weighted by the
+    next time step's smoothed probabilities divided by its predicted ones,
+    a predicted probability within ``threshold`` of zero passes nothing back
+    (dynamax's ``jnp.isclose(p, 0)``), and each time step is normalized
+    with a log-sum-exp. Probabilities that would underflow to zero in
+    float32 keep finite log values. Where ``hmm_smoother`` in float32 returns
+    NaN for a segment, the float32 marginals are those of ``hmm_smoother``
+    in float64, up to rounding, on inputs where float64 probabilities do not
+    underflow; where they do, ``hmm_smoother`` in float64 can return NaN and
+    the float32 marginals stay finite.
+
+    Parameters
+    ----------
+    transition_matrix: jax array, shape (num_states, num_states)
+        Transition matrix
+    log_likelihoods: jax array, shape (num_timesteps, num_states)
+        Log likelihoods of emissions given hidden state and parameters, set
+        to zero at masked time steps
+    threshold: float, default=1e-8
+        Largest predicted probability through which the backward pass
+        passes nothing back (float32 only; ``hmm_smoother`` fixes it at
+        1e-8)
+
+    Returns
+    -------
+    smoothed_probs: jax array, shape (num_timesteps, num_states)
+        Marginal probability of each state at each time step
+    """
+    num_states = transition_matrix.shape[0]
+    if not hmm_sampler_uses_log_space(log_likelihoods.dtype):
+        initial_distribution = jnp.ones(num_states) / num_states
+        return hmm_smoother(
+            initial_distribution, transition_matrix, log_likelihoods
+        ).smoothed_probs
+
+    dtype = log_likelihoods.dtype
+    log_transition_matrix = jnp.log(transition_matrix.astype(dtype))
+    log_threshold = jnp.log(jnp.asarray(threshold, dtype))
+    _, log_filtered = _hmm_log_filter(log_transition_matrix, log_likelihoods)
+
+    def backward(log_smoothed_next, log_filtered_t):
+        log_predicted_next = jax.nn.logsumexp(
+            log_filtered_t[:, na] + log_transition_matrix, axis=0
+        )
+        log_relative = jnp.where(
+            log_predicted_next <= log_threshold,
+            -jnp.inf,
+            log_smoothed_next - log_predicted_next,
+        )
+        log_smoothed = log_filtered_t + jax.nn.logsumexp(
+            log_transition_matrix + log_relative[na, :], axis=1
+        )
+        log_smoothed = log_smoothed - jax.nn.logsumexp(log_smoothed)
+        return log_smoothed, log_smoothed
+
+    _, log_smoothed = lax.scan(
+        backward, log_filtered[-1], log_filtered[:-1], reverse=True
+    )
+    return jnp.exp(jnp.concatenate([log_smoothed, log_filtered[-1:]]))
 
 
 def sample_hmm_stateseq(seed, transition_matrix, log_likelihoods, mask):

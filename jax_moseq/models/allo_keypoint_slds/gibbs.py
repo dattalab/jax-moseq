@@ -19,9 +19,8 @@ from jax_moseq.models.keypoint_slds import (
     apply_rotation,
 )
 
-from jax_moseq.utils.distributions import sample_hmm_stateseq
+from jax_moseq.utils.distributions import hmm_smoothed_marginals, sample_hmm_stateseq
 
-from dynamax.hidden_markov_model.inference import hmm_smoother
 from dynamax.nonlinear_gaussian_ssm import (
     ParamsNLGSSM,
     extended_kalman_posterior_sample,
@@ -148,15 +147,13 @@ def stateseq_marginals(
         Marginal probability of each discrete state at each time step.
     """
     nlags = get_nlags(Ab)
-    num_states = pi.shape[0]
 
-    initial_distribution = jnp.ones(num_states) / num_states
     log_likelihoods = _stateseq_log_likelihoods(
         x, h, v, Ab, Q, delta_h, sigmasq_h, delta_v, sigmasq_v
     )
     masked_log_likelihoods = log_likelihoods * mask[:, nlags:, na]
 
-    smoother = lambda lls: hmm_smoother(initial_distribution, pi, lls).smoothed_probs
+    smoother = lambda lls: hmm_smoothed_marginals(pi, lls)
     return mixed_map(smoother)(masked_log_likelihoods)
 
 
