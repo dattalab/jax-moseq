@@ -18,7 +18,9 @@ from jax_moseq.utils import (
 from jax_moseq.utils import convert_data_precision
 from jax_moseq.utils.distributions import (
     sample_mniw,
+    hmm_sampler_uses_log_space,
     sample_hmm_stateseq,
+    sample_hmm_stateseq_from_likelihoods,
     sample_hmm_stateseq_from_log_likelihoods,
 )
 from jax_moseq.utils.autoregression import (
@@ -38,6 +40,15 @@ na = jnp.newaxis
 def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, **kwargs):
     """
     Resamples the discrete state sequence ``z``.
+
+    The precision of the AR log likelihoods selects the sampler
+    (:py:func:`jax_moseq.utils.distributions.hmm_sampler_uses_log_space`):
+    in float32 the states are drawn in log space from the masked log
+    likelihoods
+    (:py:func:`jax_moseq.utils.distributions.sample_hmm_stateseq_from_log_likelihoods`),
+    in any other precision from likelihoods scaled by each frame's largest
+    (:py:func:`jax_moseq.utils.distributions.sample_hmm_stateseq_from_likelihoods`).
+    Either way the log likelihoods are computed one segment at a time.
 
     Parameters
     ----------
@@ -62,15 +73,30 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, **kwargs):
         Discrete state sequences.
     """
     nlags = get_nlags(Ab)
+    segments = (x, mask.astype(float)[:, nlags:])
+    seeds = jr.split(seed, mask.shape[0])
 
     def log_likelihoods(args):
         # one segment at a time, in (T - nlags, num_states) layout
         x, mask = args
         return ar_log_likelihoods(x, Ab, Q) * mask[:, na]
 
-    lls = jax.lax.map(log_likelihoods, (x, mask.astype(float)[:, nlags:]))
-    _, z = jax.vmap(sample_hmm_stateseq_from_log_likelihoods, in_axes=(0, na, 0))(
-        jr.split(seed, mask.shape[0]), pi, lls
+    ll_dtype = jax.eval_shape(log_likelihoods, (x[0], segments[1][0])).dtype
+    if hmm_sampler_uses_log_space(ll_dtype):
+        lls = jax.lax.map(log_likelihoods, segments)
+        _, z = jax.vmap(sample_hmm_stateseq_from_log_likelihoods, in_axes=(0, na, 0))(
+            seeds, pi, lls
+        )
+        return z
+
+    def likelihoods(args):
+        log_likelihoods_ = log_likelihoods(args)
+        ll_max = log_likelihoods_.max(axis=1)
+        return jnp.exp(log_likelihoods_ - ll_max[:, na]), ll_max
+
+    probs, ll_max = jax.lax.map(likelihoods, segments)
+    _, z = jax.vmap(sample_hmm_stateseq_from_likelihoods, in_axes=(0, na, 0, 0))(
+        seeds, pi, probs, ll_max
     )
     return z
 
