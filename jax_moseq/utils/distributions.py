@@ -147,14 +147,6 @@ def sample_mniw(seed, nu, S, M, K):
     return A, sigma
 
 
-def _normalize(u, eps=1e-15):
-    # dynamax's HMM filter normalization
-    u = jnp.where(u == 0, 0, jnp.where(u < eps, eps, u))
-    c = u.sum()
-    c = jnp.where(c == 0, 1, c)
-    return u / c, c
-
-
 def _choice(p, u):
     # jr.choice(key, len(p), p=p), given u = jr.uniform(key, dtype=p.dtype)
     p_cuml = jnp.cumsum(p)
@@ -162,12 +154,55 @@ def _choice(p, u):
     return jnp.searchsorted(p_cuml, r, method="compare_all").astype(int)
 
 
+def _hmm_log_filter(log_transition_matrix, log_likelihoods):
+    """Forward filtering in log space, uniform initial distribution.
+
+    Each time step's log likelihoods are overwritten with its filtered log
+    probabilities, so that one ``(num_timesteps, num_states)`` array serves
+    both.
+
+    Parameters
+    ----------
+    log_transition_matrix: jax array, shape (num_states, num_states)
+        Log transition probabilities
+    log_likelihoods: jax array, shape (num_timesteps, num_states)
+        Log likelihoods of emissions, zero at masked time steps
+
+    Returns
+    -------
+    log_norm: float
+        Marginal log likelihood
+    log_filtered: jax array, shape (num_timesteps, num_states)
+        Log filtered probabilities
+    """
+    num_timesteps, num_states = log_likelihoods.shape
+    dtype = log_likelihoods.dtype
+    log_initial = jnp.full(num_states, -jnp.log(num_states), dtype)
+
+    def forward(carry, t):
+        log_norm, log_predicted, log_probs = carry
+        log_joint = log_predicted + log_probs[t]
+        log_c = jax.nn.logsumexp(log_joint)
+        log_filtered = log_joint - log_c
+        log_probs = log_probs.at[t].set(log_filtered)
+        log_predicted = jax.nn.logsumexp(
+            log_filtered[:, na] + log_transition_matrix, axis=0
+        )
+        return (log_norm + log_c, log_predicted, log_probs), None
+
+    carry = (jnp.zeros((), dtype), log_initial, log_likelihoods)
+    (log_norm, _, log_filtered), _ = lax.scan(
+        forward, carry, jnp.arange(num_timesteps)
+    )
+    return log_norm, log_filtered
+
+
 def sample_hmm_stateseq(seed, transition_matrix, log_likelihoods, mask):
     """Sample state sequences in a Markov chain.
 
-    Forward filtering, backward sampling, with the arithmetic and random
-    draws of dynamax's ``hmm_posterior_sample`` (uniform initial
-    distribution); see :py:func:`sample_hmm_stateseq_from_likelihoods`.
+    Forward filtering, backward sampling, in log space, with a uniform
+    initial distribution; see
+    :py:func:`sample_hmm_stateseq_from_log_likelihoods`.
 
     Parameters
     ----------
@@ -187,25 +222,35 @@ def sample_hmm_stateseq(seed, transition_matrix, log_likelihoods, mask):
     states: jax array, shape (num_timesteps,)
         Sequence of sampled states
     """
-    log_likelihoods = log_likelihoods * mask[:, None]
-    ll_max = log_likelihoods.max(axis=1)
-    likelihoods = jnp.exp(log_likelihoods - ll_max[:, None])
-    return sample_hmm_stateseq_from_likelihoods(
-        seed, transition_matrix, likelihoods, ll_max
+    return sample_hmm_stateseq_from_log_likelihoods(
+        seed, transition_matrix, log_likelihoods * mask[:, None]
     )
 
 
-def sample_hmm_stateseq_from_likelihoods(seed, transition_matrix, likelihoods, ll_max):
-    """Sample state sequences in a Markov chain from scaled likelihoods.
+def sample_hmm_stateseq_from_log_likelihoods(seed, transition_matrix, log_likelihoods):
+    """Sample state sequences in a Markov chain from masked log likelihoods.
 
-    ``likelihoods[t] = exp(log_likelihoods[t] - ll_max[t])``, where
-    ``ll_max[t]`` is the largest log likelihood at time ``t`` (zero for
-    masked frames). The forward pass overwrites each time step's likelihoods
-    with its filtered probabilities, so that one ``(num_timesteps,
-    num_states)`` array serves both. The uniform draws of the backward pass
-    are made for all time steps before the pass, and each state is located
-    in the cumulative probabilities with one vectorized comparison. The
-    arithmetic and the draws are those of dynamax's ``hmm_posterior_sample``.
+    Forward filtering, backward sampling, with a uniform initial
+    distribution, computed with log probabilities: each time step's filtered
+    log probabilities are normalized with a log-sum-exp, and each prediction
+    is a log-sum-exp over the previous time step's states. States whose
+    probabilities fall below the floating-point range keep finite log
+    probabilities, so the draws follow the posterior in float32 as in
+    float64, and exact zeros in the transition matrix remain impossible
+    transitions. While the log likelihoods are finite, every time step keeps
+    at least one possible state; a time step with none, which only
+    non-finite log likelihoods can cause, makes the marginal log likelihood
+    non-finite, and the states drawn for that time step and the rest of the
+    segment are then undefined.
+
+    The forward pass overwrites each time step's log likelihoods with its
+    filtered log probabilities, so that one ``(num_timesteps, num_states)``
+    array serves both. The backward pass draws each state in proportion to
+    its filtered probability times the transition probability into the next
+    state. Its uniform draws, one per time step from ``jr.split(seed,
+    num_timesteps)``, are those of dynamax's ``hmm_posterior_sample``, and
+    each state is located in the cumulative probabilities with one
+    vectorized comparison, as ``jax.random.choice`` locates it.
 
     Parameters
     ----------
@@ -213,10 +258,9 @@ def sample_hmm_stateseq_from_likelihoods(seed, transition_matrix, likelihoods, l
         Random seed
     transition_matrix: jax array, shape (num_states, num_states)
         Transition matrix
-    likelihoods: jax array, shape (num_timesteps, num_states)
-        Emission likelihoods scaled by ``exp(-ll_max)`` at each time step
-    ll_max: jax array, shape (num_timesteps,)
-        Log of the scale of each time step's likelihoods
+    log_likelihoods: jax array, shape (num_timesteps, num_states)
+        Log likelihoods of emissions given hidden state and parameters, set
+        to zero at masked time steps
 
     Returns
     -------
@@ -225,33 +269,25 @@ def sample_hmm_stateseq_from_likelihoods(seed, transition_matrix, likelihoods, l
     states: jax array, shape (num_timesteps,)
         Sequence of sampled states
     """
-    num_timesteps, num_states = likelihoods.shape
-    initial_distribution = jnp.ones(num_states) / num_states
-
-    def forward(carry, t):
-        log_normalizer, predicted_probs, probs = carry
-        filtered_probs, norm = _normalize(predicted_probs * probs[t])
-        log_normalizer += jnp.log(norm) + ll_max[t]
-        probs = probs.at[t].set(filtered_probs)
-        return (log_normalizer, transition_matrix.T @ filtered_probs, probs), None
-
-    carry = (0.0, initial_distribution, likelihoods)
-    (log_normalizer, _, filtered_probs), _ = lax.scan(
-        forward, carry, jnp.arange(num_timesteps)
-    )
+    num_timesteps = log_likelihoods.shape[0]
+    log_transition_matrix = jnp.log(transition_matrix.astype(log_likelihoods.dtype))
+    log_norm, log_filtered = _hmm_log_filter(log_transition_matrix, log_likelihoods)
 
     keys = jr.split(seed, num_timesteps)
-    u = jax.vmap(lambda key: jr.uniform(key, dtype=filtered_probs.dtype))(keys)
-    last_state = _choice(filtered_probs[-1], u[-1])
+    u = jax.vmap(lambda key: jr.uniform(key, dtype=log_filtered.dtype))(keys)
+
+    def scaled(log_p):
+        return jnp.exp(log_p - log_p.max())
+
+    last_state = _choice(scaled(log_filtered[-1]), u[-1])
 
     def backward(next_state, t):
-        smoothed_probs = filtered_probs[t] * transition_matrix[:, next_state]
-        smoothed_probs /= smoothed_probs.sum()
-        state = _choice(smoothed_probs, u[t])
+        log_p = log_filtered[t] + log_transition_matrix[:, next_state]
+        state = _choice(scaled(log_p), u[t])
         return state, state
 
     _, states = lax.scan(
         backward, last_state, jnp.arange(num_timesteps - 1), reverse=True
     )
     states = jnp.concatenate([states, jnp.array([last_state])])
-    return log_normalizer, convert_data_precision(states)
+    return log_norm, convert_data_precision(states)

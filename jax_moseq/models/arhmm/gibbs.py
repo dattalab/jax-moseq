@@ -19,7 +19,7 @@ from jax_moseq.utils import convert_data_precision
 from jax_moseq.utils.distributions import (
     sample_mniw,
     sample_hmm_stateseq,
-    sample_hmm_stateseq_from_likelihoods,
+    sample_hmm_stateseq_from_log_likelihoods,
 )
 from jax_moseq.utils.autoregression import (
     get_lags,
@@ -63,16 +63,14 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, **kwargs):
     """
     nlags = get_nlags(Ab)
 
-    def likelihoods(args):
+    def log_likelihoods(args):
         # one segment at a time, in (T - nlags, num_states) layout
         x, mask = args
-        log_likelihoods = ar_log_likelihoods(x, Ab, Q) * mask[:, na]
-        ll_max = log_likelihoods.max(axis=1)
-        return jnp.exp(log_likelihoods - ll_max[:, na]), ll_max
+        return ar_log_likelihoods(x, Ab, Q) * mask[:, na]
 
-    probs, ll_max = jax.lax.map(likelihoods, (x, mask.astype(float)[:, nlags:]))
-    _, z = jax.vmap(sample_hmm_stateseq_from_likelihoods, in_axes=(0, na, 0, 0))(
-        jr.split(seed, mask.shape[0]), pi, probs, ll_max
+    lls = jax.lax.map(log_likelihoods, (x, mask.astype(float)[:, nlags:]))
+    _, z = jax.vmap(sample_hmm_stateseq_from_log_likelihoods, in_axes=(0, na, 0))(
+        jr.split(seed, mask.shape[0]), pi, lls
     )
     return z
 
