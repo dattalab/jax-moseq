@@ -137,6 +137,7 @@ def resample_continuous_stateseqs(
         masked_obs_noise_diag,
         jitter,
         parallel_message_passing,
+        n_lags,
     )
 
     # =========================================================================
@@ -156,7 +157,7 @@ def resample_continuous_stateseqs(
 
 
 
-@partial(jax.jit, static_argnames=("parallel",))
+@partial(jax.jit, static_argnames=("parallel", "dense_frames"))
 def batched_kalman_sample(
     seeds,
     y_,
@@ -174,11 +175,12 @@ def batched_kalman_sample(
     masked_obs_noise_diag,
     jitter,
     parallel,
+    dense_frames=1,
 ):
     """Wrapper that applied `mixed_map` to `kalman_sample` for batched inputs."""
     in_axes = (0, 0, 0, 0, na, na, na, na, na, na, na, 0, na, na)
     x = mixed_map(
-        partial(kalman_sample, jitter=jitter, parallel=parallel),
+        partial(kalman_sample, jitter=jitter, parallel=parallel, dense_frames=dense_frames),
         in_axes,
     )(
         seeds,

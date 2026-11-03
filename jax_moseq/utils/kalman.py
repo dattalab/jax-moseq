@@ -9,9 +9,9 @@ from dynamax.linear_gaussian_ssm.parallel_inference import (
     _get_one_param,
 )
 from dynamax.linear_gaussian_ssm.inference import (
-    lgssm_filter as serial_lgssm_filter,
     _condition_on,
     _get_params,
+    _predict,
     ParamsLGSSM,
     ParamsLGSSMInitial,
     ParamsLGSSMDynamics,
@@ -50,19 +50,27 @@ def kalman_sample(
     masked_obs_noise,
     jitter=0,
     parallel=True,
+    dense_frames=1,
 ):
     """Run forward-filtering and backward-sampling to draw samples from posterior
     of a 1st-order dynamic system.
 
-    The filter is dynamax's. When the observation noise is given as diagonal
-    entries, the initial distribution is first conditioned on the first frame
-    here, with the standard (dense) update, and dynamax receives that
-    distribution as the initial one and a noise of ``FIRST_FRAME_NOISE`` for
-    the first frame, so its own update there is negligible. Dynamax's update for diagonal entries uses the
+    Dynamax updates on observation noise given as diagonal entries with the
     Woodbury identity, which loses precision when the predicted state
-    variance is much larger than the observation noise, as at a vague
-    initial distribution; in float32 it can leave the first filtered
-    covariance indefinite.
+    variance is much larger than the observation noise, as under a vague
+    initial distribution; in float32 it can leave the filtered covariance
+    indefinite. With diagonal entries, the initial distribution is therefore
+    conditioned on the first frame here, with the standard (dense) update,
+    and the filter receives that distribution as the initial one and a noise
+    of ``FIRST_FRAME_NOISE`` for the first frame, so its own update there is
+    negligible. The parallel filter is dynamax's; it conditions every later
+    frame against the dynamics noise rather than the propagated prediction,
+    so only the first frame meets the initial distribution. The sequential
+    filter conditions each frame against the propagated prediction, and
+    where the state holds frames the first frame does not observe (the
+    older lags of an autoregression), their vague prior reaches the next
+    frames; it uses the dense update for the first ``dense_frames`` frames
+    and the Woodbury update after (:py:func:`serial_lgssm_filter`).
 
     Both samplers are dynamax's, except that the covariance of each frame's
     state given the next one's is computed in Joseph form,
@@ -116,6 +124,10 @@ def kalman_sample(
     parallel : bool, default=True,
         Use associative scan for Kalman sampling, which is faster on
         a GPU but has a significantly longer jit time.
+    dense_frames : int, default=1
+        Number of first frames the sequential filter conditions on with the
+        dense update when ``Rs`` holds diagonal entries; the number of lags
+        of an autoregression written as a 1st-order system.
 
     Returns
     -------
@@ -167,7 +179,7 @@ def kalman_sample(
     if parallel:
         return parallel_lgssm_sample(seed, params, ys)
     else:
-        return serial_lgssm_sample(seed, params, ys, jitter=jitter)
+        return serial_lgssm_sample(seed, params, ys, jitter=jitter, dense_frames=dense_frames)
 
 
 def parallel_lgssm_sample(key, params, emissions):
@@ -227,13 +239,59 @@ def parallel_lgssm_sample(key, params, emissions):
     return samples
 
 
-def serial_lgssm_sample(key, params, emissions, jitter=0.0):
+def serial_lgssm_filter(params, emissions, dense_frames=1):
+    """Dynamax's sequential Kalman filter, with the dense update on the first
+    ``dense_frames`` frames.
+
+    Dynamax's ``inference.lgssm_filter`` conditions each frame on its
+    observation and predicts the next, using the Woodbury identity when the
+    observation noise is given as diagonal entries. Here the first
+    ``dense_frames`` frames are conditioned with the standard update, as
+    dynamax conditions full noise matrices, and later frames as dynamax
+    does. The marginal log likelihood is not computed.
+
+    Parameters
+    ----------
+    params: dynamax ParamsLGSSM
+        Model parameters, with no inputs.
+    emissions: jax.Array with shape (T, obs_dim)
+        Observations.
+    dense_frames: int, default=1
+        Number of first frames conditioned with the standard update.
+
+    Returns
+    -------
+    means: jax.Array with shape (T, state_dim)
+        Filtered means.
+    covs: jax.Array with shape (T, state_dim, state_dim)
+        Filtered covariances.
+    """
+    num_timesteps = len(emissions)
+    no_input = jnp.zeros(0, emissions.dtype)
+
+    def step(dense, carry, t):
+        mean, cov = carry
+        F, B, b, Q, H, D, d, R = _get_params(params, num_timesteps, t)
+        if dense and R.ndim == 1:
+            R = jnp.diag(R)
+        mean, cov = _condition_on(mean, cov, H, D, d, R, no_input, emissions[t])
+        return _predict(mean, cov, F, B, b, Q, no_input), (mean, cov)
+
+    first = min(dense_frames, num_timesteps)
+    carry = (params.initial.mean, params.initial.cov)
+    carry, (m1, P1) = lax.scan(partial(step, True), carry, jnp.arange(first))
+    _, (m2, P2) = lax.scan(partial(step, False), carry, jnp.arange(first, num_timesteps))
+    return jnp.concatenate([m1, m2]), jnp.concatenate([P1, P2])
+
+
+def serial_lgssm_sample(key, params, emissions, jitter=0.0, dense_frames=1):
     """Draw a sample of the latent states with dynamax's sequential sampler,
     computing the covariance of each state given the next in Joseph form.
 
-    Dynamax's ``inference.lgssm_posterior_sample`` runs the Kalman filter,
-    then samples backward in time each state given the next from
-    N(m_t + E_t (x_{t+1} - F m_t - b), L_t), with
+    Dynamax's ``inference.lgssm_posterior_sample`` runs the Kalman filter
+    (here :py:func:`serial_lgssm_filter`), then samples backward in time
+    each state given the next from N(m_t + E_t (x_{t+1} - F m_t - b), L_t),
+    with
     E_t = P_t F^T (F P_t F^T + Q)^-1, plus ``jitter`` on the diagonal of L_t.
     It computes L_t as P_t - E_t (F P_t F^T + Q) E_t^T. Here L_t is
     (I - E_t F) P_t (I - E_t F)^T + E_t Q E_t^T, which is the same matrix in
@@ -250,6 +308,9 @@ def serial_lgssm_sample(key, params, emissions, jitter=0.0):
         Observations.
     jitter: float, default=0
         Amount added to the diagonal of each backward covariance.
+    dense_frames: int, default=1
+        Number of first frames the filter conditions on with the standard
+        update (:py:func:`serial_lgssm_filter`).
 
     Returns
     -------
@@ -257,8 +318,7 @@ def serial_lgssm_sample(key, params, emissions, jitter=0.0):
         Sampled latent states.
     """
     num_timesteps = len(emissions)
-    filtered = serial_lgssm_filter(params, emissions)
-    means, covs = filtered.filtered_means, filtered.filtered_covariances
+    means, covs = serial_lgssm_filter(params, emissions, dense_frames)
 
     def step(next_state, args):
         key, m, P, t = args
