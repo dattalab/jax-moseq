@@ -181,6 +181,9 @@ def stateseq_mode(x, mask, Ab, Q, pi, **kwargs):
 
 
 MAX_REFINEMENT_PASSES = 30
+# a state's refinement stops once its correction is at most this fraction
+# of the posterior SD of every entry of its AR matrix
+REFINEMENT_SD_TOLERANCE = 0.01
 
 
 def ar_params_use_refinement(dtype):
@@ -275,11 +278,12 @@ def resample_ar_params_with_passes(
     outer products, is refined by passes over the state's frames: each pass
     sums r x_in^T for the residuals r = x_out - M x_in, solves the posterior
     normal equations for the correction, and adds it to M. A state stops when
-    its correction is at most float32 resolution relative to M (the largest
-    absolute entries compared), when its correction is no smaller than the
-    previous one, which is then not added, or after
-    ``MAX_REFINEMENT_PASSES`` passes, as LAPACK's mixed-precision
-    refinement stops. The inverse-Wishart scale is S_0 + sum r r^T
+    every entry of its correction is at most ``REFINEMENT_SD_TOLERANCE``
+    (0.01) of that entry's posterior SD, sqrt(E[Q]_ii K_n,jj) with
+    E[Q] = S_n / (nu_n - latent_dim - 1) from the pass's residuals; when its
+    correction is no smaller than the previous one; or after
+    ``MAX_REFINEMENT_PASSES`` passes. The correction of the pass a state
+    stops at is not added. The inverse-Wishart scale is S_0 + sum r r^T
     + (M - M_0) K_0^-1 (M - M_0)^T, with the residuals at the final M, so
     it is positive definite by construction rather than a difference of
     large sums. The frames are visited a chunk at a time, as for the sums.
@@ -381,8 +385,6 @@ def _refined_regression_params(
     reshaped segments and the per-state sums."""
     latent_dim = x.shape[-1]
     d_in = latent_dim * nlags + 1
-    eps = jnp.finfo(x.dtype).eps
-
     def posterior(args):
         S_out_in, S_in_in = args
         K_0_inv = psd_inv(K_0)
@@ -432,12 +434,26 @@ def _refined_regression_params(
         i, _, active, *_ = carry
         return (i < MAX_REFINEMENT_PASSES) & active.any()
 
+    def scale_matrix(R, M):
+        dM = M - M_0
+        return S_0 + R + dM @ K_0_inv @ dM.T
+
+    # posterior SD of each entry of Ab, sqrt(E[Q]_ii K_n,jj), with
+    # E[Q] = S_n / (nu_n - latent_dim - 1); the denominator is kept at least 1
+    dof = jnp.maximum(nu_0 + counts - latent_dim - 1, 1.0)
+    K_n_diag = jnp.diagonal(K_n, axis1=1, axis2=2)
+
+    def posterior_sd(R, M):
+        S_n = jax.vmap(scale_matrix)(R, M)
+        Q_diag = jnp.diagonal(S_n, axis1=1, axis2=2) / dof[:, na]
+        return jnp.sqrt(jnp.abs(Q_diag)[:, :, na] * K_n_diag[:, na, :])
+
     def refinement_pass(carry):
         i, M, active, last_size, passes, _ = carry
         R, G = residual_sums(M)
         delta = jax.vmap(correction)(K_n_inv, M, G)
         size = jnp.abs(delta).max(axis=(1, 2))
-        converged = size <= eps * jnp.abs(M).max(axis=(1, 2))
+        converged = (jnp.abs(delta) / posterior_sd(R, M)).max(axis=(1, 2)) <= REFINEMENT_SD_TOLERANCE
         stalled = size >= last_size
         passes = passes + active
         refine = active & ~converged & ~stalled & (i + 1 < MAX_REFINEMENT_PASSES)
@@ -458,9 +474,7 @@ def _refined_regression_params(
 
     def draw(args):
         seed, R, M_n, K_n, n = args
-        dM = M_n - M_0
-        S_n = S_0 + R + dM @ K_0_inv @ dM.T
-        return sample_mniw(seed, nu_0 + n, S_n, M_n, K_n)
+        return sample_mniw(seed, nu_0 + n, scale_matrix(R, M_n), M_n, K_n)
 
     Ab, Q = jax.lax.map(draw, (seeds, R, M_n, K_n, counts))
     return Ab, Q, passes

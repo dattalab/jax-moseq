@@ -12,7 +12,8 @@ in an order that varies between calls.
 In float32 the step stays finite where the residual sum of a state is below
 the resolution of its float32 sums of x x^T, as in states made of
 interpolated keypoints, and it reports how many refinement passes each state
-took. In float64 its draws are bit-identical to jax-moseq 23c668c's.
+took; a state stops once its correction is below 0.01 of its posterior SD,
+after one or two passes when it is well conditioned. In float64 its draws are bit-identical to jax-moseq 23c668c's.
 """
 
 import re
@@ -308,3 +309,17 @@ def test_float64_draws_are_bit_identical_to_23c668c(inputs):
     assert Ab.dtype == jnp.float64
     np.testing.assert_array_equal(Ab, Ab_ref)
     np.testing.assert_array_equal(Q, Q_ref)
+
+
+def test_float32_well_conditioned_states_stop_after_one_or_two_passes(inputs):
+    """On random-walk segments every state's first correction is far below
+    0.01 of its posterior SD, so refinement ends after one or two passes."""
+    from jax_moseq.models.arhmm.gibbs import resample_ar_params_with_passes
+
+    f32 = {k: jnp.asarray(v, jnp.float32) if k in ("x", "mask", "S_0", "M_0", "K_0") else v
+           for k, v in inputs.items()}
+    with jax.enable_x64(False):
+        _, _, passes = resample_ar_params_with_passes(jr.PRNGKey(0), **f32)
+    used = np.ones(NUM_STATES, bool)
+    used[UNUSED_STATE] = False
+    assert passes[used].max() <= 2, np.bincount(np.asarray(passes))
