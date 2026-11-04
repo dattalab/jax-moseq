@@ -216,9 +216,9 @@ def test_location_step_is_finite_in_float32_from_its_vague_prior(parallel):
 @pytest.mark.parametrize("parallel", [False, True])
 def test_kalman_sample_takes_diagonal_or_dense_observation_noise(parallel):
     """Same seed, observation noise as (T, 2) diagonal entries or (T, 2, 2)
-    diagonal matrices, with masked frames: the float64 draws agree to within
-    the diagonal form's own rounding at the first frames (about 3e-6 at
-    t = 0 from a prior variance of 1e4, under 1e-7 from t = 10)."""
+    diagonal matrices, with masked frames and a prior variance of 1e4: both
+    forms are conditioned on with the same arithmetic, so the float64 draws
+    agree to rounding."""
     t, d = 50, 2
     rng = np.random.default_rng(1)
     ys = jnp.asarray(rng.standard_normal((t, d)).cumsum(0))
@@ -237,8 +237,7 @@ def test_kalman_sample_takes_diagonal_or_dense_observation_noise(parallel):
     diagonal = draw(R, jnp.full(d, 40.0))
     dense = draw(R[..., na] * eye, eye * 40.0)
     assert dense.dtype == jnp.float64
-    np.testing.assert_allclose(dense, diagonal, rtol=0, atol=1e-5)
-    np.testing.assert_allclose(dense[10:], diagonal[10:], rtol=0, atol=1e-7)
+    np.testing.assert_allclose(dense, diagonal, rtol=0, atol=1e-12)
 
 
 @pytest.mark.parametrize("noise_scale", [1.0, 0.01])

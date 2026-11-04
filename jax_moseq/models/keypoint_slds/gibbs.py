@@ -333,10 +333,6 @@ def resample_location(
     Q = jnp.eye(d)[na] * sigmasq_loc
     C = jnp.eye(d)
     D = jnp.zeros(d)
-    # Observation noise as diagonal matrices rather than diagonal entries:
-    # dynamax's update for diagonal entries cancels catastrophically in
-    # float32 at each segment's first frame, where the prior variance (1e4)
-    # dwarfs gammasq, and can give a negative filtered variance.
     R = gammasq[..., na] * jnp.eye(d, dtype=gammasq.dtype)
     zz = jnp.zeros_like(mask[:, 1:], dtype=int)
 
