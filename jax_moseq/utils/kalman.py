@@ -64,12 +64,9 @@ def kalman_sample(
     and the filter receives that distribution as the initial one and a noise
     of ``FIRST_FRAME_NOISE`` for the first frame, so its own update there is
     negligible. The parallel filter (:py:func:`parallel_lgssm_filter`)
-    conditions every frame in Joseph form. The sequential filter conditions
-    each frame against the propagated prediction, and where the state holds
-    frames the first frame does not observe (the older lags of an
-    autoregression), their vague prior reaches the next frames; it uses the
-    dense update for the first ``dense_frames`` frames and the Woodbury
-    update after (:py:func:`serial_lgssm_filter`).
+    conditions every frame in Joseph form. The sequential filter
+    (:py:func:`serial_lgssm_filter`) uses the dense update for the first
+    ``dense_frames`` frames and the Joseph form after.
 
     Both samplers compute the covariance of each frame's state given the
     next one's in Joseph form, (I - E F) P (I - E F)^T + E Q E^T, a sum of
@@ -102,11 +99,8 @@ def kalman_sample(
         Observation input matrix
     Rs: jax.Array with shape (T, obs_dim) or (T, obs_dim, obs_dim)
         Observation noise covariances, as their diagonal entries or as full
-        matrices. Dynamax updates diagonal entries with the Woodbury
-        identity, which loses precision in float32 when the predicted state
-        variance is much larger than the observation noise; full matrices
-        use its standard update. With diagonal entries the first frame is
-        conditioned on with the standard update (see above).
+        matrices. With diagonal entries the first frame is conditioned on
+        with the standard update (see above).
     masked_dynamics_params: dict with key-value pairs
         - weights: jax.Array with shape (ar_dim, ar_dim)
         - bias: jax.Array with shape (ar_dim,)
@@ -368,15 +362,20 @@ def parallel_lgssm_sample(key, params, emissions):
 
 
 def serial_lgssm_filter(params, emissions, dense_frames=1):
-    """Dynamax's sequential Kalman filter, with the dense update on the first
-    ``dense_frames`` frames.
+    """Dynamax's sequential Kalman filter, with each frame after the first
+    ``dense_frames`` conditioned on its observation in Joseph form.
 
     Dynamax's ``inference.lgssm_filter`` conditions each frame on its
-    observation and predicts the next, using the Woodbury identity when the
-    observation noise is given as diagonal entries. Here the first
-    ``dense_frames`` frames are conditioned with the standard update, as
-    dynamax conditions full noise matrices, and later frames as dynamax
-    does. The marginal log likelihood is not computed.
+    observation and predicts the next. It computes the conditioned
+    covariance as P - K S K^T and, with observation noise given as diagonal
+    entries, uses the Woodbury identity; when the prediction is far more
+    vague than the observation, as under a vague prior or a large dynamics
+    noise, both are differences of much larger numbers, and in float32 the
+    filtered covariance can come out indefinite. Here the first
+    ``dense_frames`` frames are conditioned with dynamax's standard update,
+    as it conditions full noise matrices, and later frames in Joseph form
+    (:py:func:`_joseph_update`). The marginal log likelihood is not
+    computed.
 
     Parameters
     ----------
@@ -385,7 +384,7 @@ def serial_lgssm_filter(params, emissions, dense_frames=1):
     emissions: jax.Array with shape (T, obs_dim)
         Observations.
     dense_frames: int, default=1
-        Number of first frames conditioned with the standard update.
+        Number of first frames conditioned with dynamax's standard update.
 
     Returns
     -------
@@ -400,9 +399,12 @@ def serial_lgssm_filter(params, emissions, dense_frames=1):
     def step(dense, carry, t):
         mean, cov = carry
         F, B, b, Q, H, D, d, R = _get_params(params, num_timesteps, t)
-        if dense and R.ndim == 1:
-            R = jnp.diag(R)
-        mean, cov = _condition_on(mean, cov, H, D, d, R, no_input, emissions[t])
+        if dense:
+            R = jnp.diag(R) if R.ndim == 1 else R
+            mean, cov = _condition_on(mean, cov, H, D, d, R, no_input, emissions[t])
+        else:
+            K, cov, _ = _joseph_update(cov, H, R)
+            mean = mean + K @ (emissions[t] - d - H @ mean)
         return _predict(mean, cov, F, B, b, Q, no_input), (mean, cov)
 
     first = min(dense_frames, num_timesteps)

@@ -17,7 +17,7 @@
   lags, whose vague prior reaches the frames after the first.
 - The x step stays finite in float32 at frames where a state with a large
   AR noise covariance, as a tracking-glitch state learns, meets one
-  confident keypoint among vague ones, with the parallel sampler.
+  confident keypoint among vague ones, for either Kalman sampler.
 - The heading (h) step draws each frame's angle from its von Mises
   conditional: the draws' probability integral transform is uniform, at low
   concentrations and at those of real data.
@@ -435,7 +435,7 @@ def confident_keypoint_in_large_noise_state_x_inputs():
     return dict(y=y, mask=np.ones((n, t)), z=z, s=s, Ab=Ab, Q=Q, Cd=Cd, sigmasq=sigmasq)
 
 
-@pytest.mark.parametrize("parallel", [True])
+@pytest.mark.parametrize("parallel", [False, True])
 def test_x_step_is_finite_in_float32_where_a_large_noise_state_meets_a_confident_keypoint(parallel):
     x = float32_x_step(confident_keypoint_in_large_noise_state_x_inputs(), parallel)
     assert np.isfinite(x).all()
