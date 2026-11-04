@@ -15,6 +15,9 @@
   noise covariance is near-singular, with the parallel sampler and with the
   sequential one without jitter; and when the AR dynamics weight the older
   lags, whose vague prior reaches the frames after the first.
+- The x step stays finite in float32 at frames where a state with a large
+  AR noise covariance, as a tracking-glitch state learns, meets one
+  confident keypoint among vague ones, with the parallel sampler.
 - The heading (h) step draws each frame's angle from its von Mises
   conditional: the draws' probability integral transform is uniform, at low
   concentrations and at those of real data.
@@ -395,3 +398,44 @@ def vague_older_lags_x_inputs():
 @pytest.mark.parametrize("parallel", [False, True])
 def test_x_step_is_finite_in_float32_when_the_older_lags_are_vague(parallel):
     assert np.isfinite(float32_x_step(vague_older_lags_x_inputs(), parallel)).all()
+
+
+def confident_keypoint_in_large_noise_state_x_inputs():
+    """24 segments of 60 frames with runs of three frames, every ten frames,
+    in a state whose AR noise covariance is 5 I, as in a tracking-glitch
+    state; on those frames every keypoint is vague (noise scale 100) except
+    one (0.2). The dynamics noise then predicts the frame far more vaguely
+    than the confident keypoint observes it: the cancellation factor
+    1 + lambda_max(U' R^-1 U), U = H chol(Q), is 4,000 to 14,000 there and
+    600 at each segment's first frame. Conditioning such a frame with
+    dynamax's Woodbury update for diagonal noise leaves the float32 filtered
+    covariance indefinite, on CPU in 13 of the 24 segments with the parallel
+    filter, and the sequential sampler non-finite in all 24."""
+    n, t, latent_dim, nlags, num_keypoints = 24, 60, 4, 3, 8
+    obs_dim = 2 * num_keypoints
+    rng = np.random.default_rng(0)
+    Cd = np.concatenate(
+        [16 * rng.standard_normal((obs_dim, latent_dim)), 5 * rng.standard_normal((obs_dim, 1))], 1
+    )
+    Q = np.stack([0.1 * np.eye(latent_dim), 5.0 * np.eye(latent_dim)])
+    Ab, Q = ar_params_for_x_step(2, latent_dim, nlags, Q)
+    z = np.zeros((n, t - nlags), int)
+    for start in range(10, t - nlags - 3, 10):
+        z[:, start : start + 3] = 1
+    glitch = np.zeros((n, t), bool)
+    glitch[:, nlags:] = z == 1
+    s = np.full((n, t, obs_dim), 25.0)
+    confident = rng.integers(0, num_keypoints, n)
+    for i in range(n):
+        s[i, glitch[i]] = 100.0
+        s[i, glitch[i], 2 * confident[i] : 2 * confident[i] + 2] = 0.2
+    sigmasq = np.full(obs_dim, 4.0)
+    x = 0.3 * rng.standard_normal((n, t, latent_dim)).cumsum(1)
+    y = x @ Cd[:, :-1].T + Cd[:, -1] + np.sqrt(sigmasq * s) * rng.standard_normal((n, t, obs_dim))
+    return dict(y=y, mask=np.ones((n, t)), z=z, s=s, Ab=Ab, Q=Q, Cd=Cd, sigmasq=sigmasq)
+
+
+@pytest.mark.parametrize("parallel", [True])
+def test_x_step_is_finite_in_float32_where_a_large_noise_state_meets_a_confident_keypoint(parallel):
+    x = float32_x_step(confident_keypoint_in_large_noise_state_x_inputs(), parallel)
+    assert np.isfinite(x).all()

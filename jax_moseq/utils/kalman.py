@@ -5,7 +5,7 @@ from jax import lax
 from functools import partial
 
 from dynamax.linear_gaussian_ssm.parallel_inference import (
-    lgssm_filter as parallel_lgssm_filter,
+    _get_emission_cov_dim,
     _get_one_param,
 )
 from dynamax.linear_gaussian_ssm.inference import (
@@ -19,7 +19,7 @@ from dynamax.linear_gaussian_ssm.inference import (
 )
 
 from dynamax.utils.utils import psd_solve, symmetrize
-from jax.scipy.linalg import cho_factor, cho_solve
+from jax.scipy.linalg import cho_factor, cho_solve, solve_triangular
 from tensorflow_probability.substrates.jax.distributions import (
     MultivariateNormalFullCovariance as MVN,
 )
@@ -63,20 +63,18 @@ def kalman_sample(
     conditioned on the first frame here, with the standard (dense) update,
     and the filter receives that distribution as the initial one and a noise
     of ``FIRST_FRAME_NOISE`` for the first frame, so its own update there is
-    negligible. The parallel filter is dynamax's; it conditions every later
-    frame against the dynamics noise rather than the propagated prediction,
-    so only the first frame meets the initial distribution. The sequential
-    filter conditions each frame against the propagated prediction, and
-    where the state holds frames the first frame does not observe (the
-    older lags of an autoregression), their vague prior reaches the next
-    frames; it uses the dense update for the first ``dense_frames`` frames
-    and the Woodbury update after (:py:func:`serial_lgssm_filter`).
+    negligible. The parallel filter (:py:func:`parallel_lgssm_filter`)
+    conditions every frame in Joseph form. The sequential filter conditions
+    each frame against the propagated prediction, and where the state holds
+    frames the first frame does not observe (the older lags of an
+    autoregression), their vague prior reaches the next frames; it uses the
+    dense update for the first ``dense_frames`` frames and the Woodbury
+    update after (:py:func:`serial_lgssm_filter`).
 
-    Both samplers are dynamax's, except that the covariance of each frame's
-    state given the next one's is computed in Joseph form,
-    (I - E F) P (I - E F)^T + E Q E^T, a sum of positive semi-definite
-    terms, rather than as P - E F P, a difference that float32 does not
-    resolve when the dynamics noise Q is near-singular
+    Both samplers compute the covariance of each frame's state given the
+    next one's in Joseph form, (I - E F) P (I - E F)^T + E Q E^T, a sum of
+    positive semi-definite terms, rather than as P - E F P, a difference
+    that float32 does not resolve when the dynamics noise Q is near-singular
     (:py:func:`parallel_lgssm_sample`, :py:func:`serial_lgssm_sample`).
 
     Parameters
@@ -182,17 +180,148 @@ def kalman_sample(
         return serial_lgssm_sample(seed, params, ys, jitter=jitter, dense_frames=dense_frames)
 
 
+def _joseph_update(P, H, R):
+    """Kalman gain and conditional covariance in Joseph form.
+
+    For a state x ~ N(m, P) observed as y ~ N(H x + d, R), the gain is
+    K = P H^T S^-1 with S = H P H^T + R, solved through the Cholesky factor
+    of S, and the covariance of x given y is
+    (I - K H) P (I - K H)^T + K R K^T, a sum of positive semi-definite
+    terms.
+
+    Parameters
+    ----------
+    P: jax.Array with shape (state_dim, state_dim)
+        Prior covariance of the state.
+    H: jax.Array with shape (obs_dim, state_dim)
+        Observation matrix.
+    R: jax.Array with shape (obs_dim,) or (obs_dim, obs_dim)
+        Observation noise covariance, as its diagonal entries or as a full
+        matrix.
+
+    Returns
+    -------
+    K: jax.Array with shape (state_dim, obs_dim)
+        Kalman gain.
+    cov: jax.Array with shape (state_dim, state_dim)
+        Covariance of the state given the observation.
+    chol_S: jax.Array with shape (obs_dim, obs_dim)
+        Lower Cholesky factor of S.
+    """
+    HP = H @ P
+    S = HP @ H.T + (jnp.diag(R) if R.ndim == 1 else R)
+    chol_S = jnp.linalg.cholesky(symmetrize(S))
+    K = cho_solve((chol_S, True), HP).T
+    I_KH = jnp.eye(P.shape[-1], dtype=P.dtype) - K @ H
+    KRK = (K * R) @ K.T if R.ndim == 1 else K @ R @ K.T
+    return K, symmetrize(I_KH @ P @ I_KH.T + KRK), chol_S
+
+
+def parallel_lgssm_filter(params, emissions):
+    """Dynamax's parallel Kalman filter, with each frame conditioned on its
+    observation in Joseph form.
+
+    Dynamax's ``parallel_inference.lgssm_filter`` (Särkkä and
+    García-Fernández, 2021) forms one element per frame, the frame's
+    state given its observation and the previous state, N(A x_{t-1} + b, C),
+    and the previous state's information from the observation, (J, eta),
+    and combines the elements with an associative scan. It computes C as
+    Q - K H Q, and with observation noise given as diagonal entries forms
+    S^-1 with the Woodbury identity; when the dynamics noise Q predicts the
+    frame far more vaguely than the observation constrains it, both are
+    differences of much larger numbers, and in float32 C can come out
+    indefinite. Here the gain is solved through the Cholesky factor of
+    S = H Q H^T + R (of H P_0 H^T + R at the first frame) and C is
+    (I - K H) Q (I - K H)^T + K R K^T (:py:func:`_joseph_update`), which is
+    the same matrix in exact arithmetic and positive semi-definite by
+    construction in floating point; J and eta are G^T G and G^T w with
+    G = L_S^-1 H F and w = L_S^-1 (y - d - H b), where L_S is that
+    Cholesky factor. Dynamax adds 1e-9 to the diagonal of S before its
+    solves; here S is factored as it is. The associative scan is dynamax's.
+    The marginal log likelihood is not computed.
+
+    Parameters
+    ----------
+    params: dynamax ParamsLGSSM
+        Model parameters, with no inputs.
+    emissions: jax.Array with shape (T, obs_dim)
+        Observations.
+
+    Returns
+    -------
+    means: jax.Array with shape (T, state_dim)
+        Filtered means.
+    covs: jax.Array with shape (T, state_dim, state_dim)
+        Filtered covariances.
+    """
+    num_timesteps = len(emissions)
+    R_dim = _get_emission_cov_dim(params, num_timesteps)
+
+    def first_element(y):
+        H = _get_one_param(params.emissions.weights, 2, 0)
+        d = _get_one_param(params.emissions.bias, 1, 0)
+        R = _get_one_param(params.emissions.cov, R_dim, 0)
+        m, P = params.initial.mean, params.initial.cov
+        K, C, _ = _joseph_update(P, H, R)
+        b = m + K @ (y - d - H @ m)
+        return jnp.zeros_like(P), b, C, jnp.zeros_like(P), jnp.zeros_like(m)
+
+    @jax.vmap
+    def generic_element(y, t):
+        F = _get_one_param(params.dynamics.weights, 2, t - 1)
+        bias = _get_one_param(params.dynamics.bias, 1, t - 1)
+        Q = _get_one_param(params.dynamics.cov, 2, t - 1)
+        H = _get_one_param(params.emissions.weights, 2, t)
+        d = _get_one_param(params.emissions.bias, 1, t)
+        R = _get_one_param(params.emissions.cov, R_dim, t)
+        K, C, chol_S = _joseph_update(Q, H, R)
+        innov = y - d - H @ bias
+        A = F - K @ (H @ F)
+        b = bias + K @ innov
+        G = solve_triangular(chol_S, H @ F, lower=True)
+        w = solve_triangular(chol_S, innov, lower=True)
+        return A, b, C, symmetrize(G.T @ G), G.T @ w
+
+    first = first_element(emissions[0])
+    rest = generic_element(emissions[1:], jnp.arange(1, num_timesteps))
+    elements = tuple(jnp.concatenate([e0[na], e]) for e0, e in zip(first, rest))
+
+    @jax.vmap
+    def operator(elem1, elem2):
+        A1, b1, C1, J1, eta1 = elem1
+        A2, b2, C2, J2, eta2 = elem2
+        I = jnp.eye(A1.shape[0], dtype=A1.dtype)
+
+        I_C1J2 = I + C1 @ J2
+        temp = jnp.linalg.solve(I_C1J2.T, A2.T).T
+        A = temp @ A1
+        b = temp @ (b1 + C1 @ eta2) + b2
+        C = symmetrize(temp @ C1 @ A2.T + C2)
+
+        I_J2C1 = I + J2 @ C1
+        temp = jnp.linalg.solve(I_J2C1.T, A1).T
+        eta = temp @ (eta2 - J2 @ b1) + eta1
+        J = symmetrize(temp @ J2 @ A1 + J1)
+        return A, b, C, J, eta
+
+    _, means, covs, _, _ = lax.associative_scan(operator, elements)
+    return means, covs
+
+
 def parallel_lgssm_sample(key, params, emissions):
     """Draw a sample of the latent states with dynamax's parallel sampler,
-    computing the covariance of each state given the next in Joseph form.
+    after jax-moseq's parallel filter, computing the covariance of each
+    state given the next in Joseph form.
 
     Dynamax's ``parallel_inference.lgssm_posterior_sample`` (Särkkä and
-    García-Fernández, 2021) samples each state given the next from
-    N(E_t x_{t+1} + g_t, L_t), with E_t = P_t F^T (F P_t F^T + Q)^-1, and
-    combines the draws with an associative scan. It computes L_t as
-    P_t - E_t F P_t. Here L_t is (I - E_t F) P_t (I - E_t F)^T
-    + E_t Q E_t^T, which is the same matrix in exact arithmetic and positive
-    semi-definite by construction in floating point; the rest is dynamax's.
+    García-Fernández, 2021) runs its parallel filter, samples each state
+    given the next from N(E_t x_{t+1} + g_t, L_t), with
+    E_t = P_t F^T (F P_t F^T + Q)^-1, and combines the draws with an
+    associative scan. It computes L_t as P_t - E_t F P_t. Here the filter is
+    :py:func:`parallel_lgssm_filter`, and L_t is (I - E_t F) P_t
+    (I - E_t F)^T + E_t Q E_t^T, which is the same matrix in exact
+    arithmetic and positive semi-definite by construction in floating point;
+    the rest is dynamax's.
 
     Parameters
     ----------
@@ -208,8 +337,7 @@ def parallel_lgssm_sample(key, params, emissions):
     xs: jax.Array with shape (T, state_dim)
         Sampled latent states.
     """
-    filtered = parallel_lgssm_filter(params, emissions)
-    means, covs = filtered.filtered_means, filtered.filtered_covariances
+    means, covs = parallel_lgssm_filter(params, emissions)
 
     @jax.vmap
     def message(m, P, t):
