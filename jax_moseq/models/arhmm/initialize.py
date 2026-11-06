@@ -4,6 +4,7 @@ import jax.random as jr
 from functools import partial
 
 from jax_moseq.utils import device_put_as_scalar, check_precision
+from jax_moseq.utils.precision import full_float32_matmuls
 from jax_moseq.utils.transitions import init_hdp_transitions
 from jax_moseq.utils.distributions import sample_mniw
 
@@ -145,6 +146,7 @@ def init_hyperparams(trans_hypparams, ar_hypparams, **kwargs):
     return {"trans_hypparams": trans_hypparams, "ar_hypparams": ar_hypparams}
 
 
+@full_float32_matmuls
 def init_model(
     data=None,
     states=None,

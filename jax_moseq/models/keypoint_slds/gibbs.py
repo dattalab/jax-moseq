@@ -4,6 +4,7 @@ import jax.random as jr
 from functools import partial
 
 from jax_moseq.utils.kalman import kalman_sample
+from jax_moseq.utils.precision import full_float32_matmuls
 from jax_moseq.utils.distributions import sample_vonmises, sample_vonmises_fisher
 
 from jax_moseq.models import arhmm, slds
@@ -367,6 +368,7 @@ def resample_location(
     return v
 
 
+@full_float32_matmuls
 def resample_model(
     data,
     seed,

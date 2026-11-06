@@ -4,6 +4,7 @@ import jax.random as jr
 import tensorflow_probability.substrates.jax.distributions as tfd
 from functools import partial
 from jax_moseq.utils import mixed_map, apply_affine
+from jax_moseq.utils.precision import full_float32_matmuls
 from jax_moseq.models import arhmm
 from jax_moseq.utils.kalman import (
     kalman_sample,
@@ -394,6 +395,7 @@ def compute_squared_error(Y, x, Cd, mask=None):
     return sqerr
 
 
+@full_float32_matmuls
 def resample_model(
     data,
     seed,

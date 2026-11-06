@@ -1,9 +1,11 @@
 import jax
 from jax_moseq.utils.autoregression import get_nlags
+from jax_moseq.utils.precision import full_float32_matmuls
 from jax_moseq.models import allo_dynamics, keypoint_slds
 
 
 @jax.jit
+@full_float32_matmuls
 def log_joint_likelihood(
     Y,
     mask,
