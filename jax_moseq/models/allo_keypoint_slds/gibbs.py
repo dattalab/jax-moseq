@@ -185,11 +185,12 @@ def perturb_heading_and_centroid(
     v[t] = v[t-1] + R(h[t-1])^T delta_v[z_t] + N(0, sigmasq_v[z_t] I_2)
 
     The draw is :py:func:`jax_moseq.utils.kalman.extended_kalman_sample`,
-    which conditions in Joseph form, so the filtered covariances stay
-    positive semi-definite in float32 at each segment's first frame, where
-    the initial variance of 1e4 meets keypoints a few pixels apart, and on
-    masked frames, where a dynamics variance of 1e8 meets an observation
-    variance of 1e-2.
+    which conditions in Joseph form with the gain computed in information
+    form, so the filtered covariances stay positive semi-definite in
+    float32 at each segment's first frame, where the initial variance of
+    1e4 meets keypoints tens of pixels from the centroid, and on masked
+    frames, where a dynamics variance of 1e8 meets an observation variance
+    of 1e-2. The emission covariance is passed as its diagonal entries.
     """
 
     def dynamics_function(hv, t):
