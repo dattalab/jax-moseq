@@ -20,11 +20,9 @@ from jax_moseq.models.keypoint_slds import (
 )
 
 from jax_moseq.utils.distributions import hmm_smoothed_marginals, sample_hmm_stateseq
+from jax_moseq.utils.kalman import extended_kalman_sample
 
-from dynamax.nonlinear_gaussian_ssm import (
-    ParamsNLGSSM,
-    extended_kalman_posterior_sample,
-)
+from dynamax.nonlinear_gaussian_ssm import ParamsNLGSSM
 
 
 def _stateseq_log_likelihoods(
@@ -185,6 +183,13 @@ def perturb_heading_and_centroid(
 
     h[t] = h[t-1] + delta_h[z_t] + N(0, sigmasq_h[z_t])
     v[t] = v[t-1] + R(h[t-1])^T delta_v[z_t] + N(0, sigmasq_v[z_t] I_2)
+
+    The draw is :py:func:`jax_moseq.utils.kalman.extended_kalman_sample`,
+    which conditions in Joseph form, so the filtered covariances stay
+    positive semi-definite in float32 at each segment's first frame, where
+    the initial variance of 1e4 meets keypoints a few pixels apart, and on
+    masked frames, where a dynamics variance of 1e8 meets an observation
+    variance of 1e-2.
     """
 
     def dynamics_function(hv, t):
@@ -224,7 +229,7 @@ def perturb_heading_and_centroid(
         emission_covariance=emission_covariance,
     )
 
-    hv = extended_kalman_posterior_sample(seed, params, Ytarg, jnp.arange(len(mask)))
+    hv = extended_kalman_sample(seed, params, Ytarg, jnp.arange(len(mask)))
     h, v = hv[:, 0], hv[:, 1:]
     return h, v
 

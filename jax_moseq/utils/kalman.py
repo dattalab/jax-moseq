@@ -441,6 +441,173 @@ def serial_lgssm_sample(key, params, emissions, jitter=0.0):
     return jnp.vstack([states, last_state])
 
 
+def _joseph_update_information(P, H, R):
+    """Kalman gain and conditional covariance in Joseph form, with the gain
+    computed in information form.
+
+    For a state x ~ N(m, P) observed as y ~ N(H x + d, R), the gain
+    K = P H^T (H P H^T + R)^-1 equals (P^-1 + H^T R^-1 H)^-1 H^T R^-1, and
+    the covariance of x given y is (I - K H) P (I - K H)^T + K R K^T. The
+    gain is computed in the second form, through the Cholesky factors of P,
+    R and P^-1 + H^T R^-1 H, so S = H P H^T + R is never formed. When the
+    prior is far more vague than the observation and the observation has
+    more dimensions than the state, S is close to singular: its largest
+    eigenvalues grow with P while its smallest stay at R's, and in float32
+    the computed S can be indefinite, so its Cholesky factor would be NaN.
+    P^-1 + H^T R^-1 H has the state's dimension and no such spread.
+
+    Parameters
+    ----------
+    P: jax.Array with shape (state_dim, state_dim)
+        Prior covariance of the state.
+    H: jax.Array with shape (obs_dim, state_dim)
+        Observation matrix.
+    R: jax.Array with shape (obs_dim, obs_dim)
+        Observation noise covariance.
+
+    Returns
+    -------
+    K: jax.Array with shape (state_dim, obs_dim)
+        Kalman gain.
+    cov: jax.Array with shape (state_dim, state_dim)
+        Covariance of the state given the observation.
+    """
+    eye = jnp.eye(P.shape[-1], dtype=P.dtype)
+    P_inv = cho_solve((jnp.linalg.cholesky(symmetrize(P)), True), eye)
+    Rinv_H = cho_solve((jnp.linalg.cholesky(symmetrize(R)), True), H)
+    information = symmetrize(P_inv + H.T @ Rinv_H)
+    K = cho_solve((jnp.linalg.cholesky(information), True), Rinv_H.T)
+    I_KH = eye - K @ H
+    return K, symmetrize(I_KH @ P @ I_KH.T + K @ R @ K.T)
+
+
+def _nlgssm_param(x, t):
+    """Frame t's covariance from an array of one per frame, or the shared one."""
+    return x[t] if x.ndim == 3 else x
+
+
+def extended_kalman_filter(params, emissions, inputs):
+    """Dynamax's extended Kalman filter, with each frame conditioned on its
+    observation in Joseph form.
+
+    Dynamax's ``nonlinear_gaussian_ssm.extended_kalman_filter`` linearizes
+    the emission function at the predicted mean, with H its Jacobian there,
+    conditions on the observation, and predicts the next frame through the
+    dynamics function linearized at the filtered mean. It computes the
+    conditioned covariance as P - K S K^T with S = H P H^T + R; when the
+    prediction is far more vague than the observation, as under a vague
+    initial distribution or a large dynamics noise, that is a difference of
+    much larger numbers, and in float32 the filtered covariance can come out
+    indefinite. Here the conditioned covariance is
+    (I - K H) P (I - K H)^T + K R K^T, with the gain computed in information
+    form (:py:func:`_joseph_update_information`), which is the same matrix
+    in exact arithmetic and positive semi-definite by construction in
+    floating point. Dynamax adds 1e-9 to the diagonal of S before its solve;
+    here no matrix is boosted. Each frame is linearized once, as dynamax
+    does by default, and the prediction is dynamax's. The marginal log
+    likelihood is not computed.
+
+    Parameters
+    ----------
+    params: dynamax ParamsNLGSSM
+        Model parameters. The dynamics and emission functions take the
+        state and the frame's input.
+    emissions: jax.Array with shape (T, obs_dim)
+        Observations.
+    inputs: jax.Array with shape (T, ...)
+        Each frame's input to the dynamics and emission functions.
+
+    Returns
+    -------
+    means: jax.Array with shape (T, state_dim)
+        Filtered means.
+    covs: jax.Array with shape (T, state_dim, state_dim)
+        Filtered covariances.
+    """
+    f, h = params.dynamics_function, params.emission_function
+    F, H = jax.jacfwd(f), jax.jacfwd(h)
+
+    def step(carry, t):
+        mean, cov = carry
+        Q = _nlgssm_param(params.dynamics_covariance, t)
+        R = _nlgssm_param(params.emission_covariance, t)
+        u = inputs[t]
+        K, cov = _joseph_update_information(cov, H(mean, u), R)
+        mean = mean + K @ (emissions[t] - h(mean, u))
+        F_x = F(mean, u)
+        prediction = (f(mean, u), F_x @ cov @ F_x.T + Q)
+        return prediction, (mean, cov)
+
+    carry = (params.initial_mean, params.initial_covariance)
+    _, (means, covs) = lax.scan(step, carry, jnp.arange(len(emissions)))
+    return means, covs
+
+
+def extended_kalman_sample(key, params, emissions, inputs):
+    """Draw a sample of the latent states with dynamax's extended Kalman
+    sampler, computing the covariance of each state given the next in Joseph
+    form.
+
+    Dynamax's ``nonlinear_gaussian_ssm.extended_kalman_posterior_sample``
+    runs the extended Kalman filter (here :py:func:`extended_kalman_filter`),
+    then samples backward in time each state given the next, linearizing the
+    dynamics function f at the filtered mean m_t, with F_t its Jacobian
+    there: from N(m_t + E_t (x_{t+1} - f(m_t)), L_t), with
+    E_t = P_t F_t^T (F_t P_t F_t^T + Q)^-1. It computes L_t as
+    P_t - E_t (F_t P_t F_t^T + Q) E_t^T. Here L_t is
+    (I - E_t F_t) P_t (I - E_t F_t)^T + E_t Q E_t^T, with E_t solved through
+    the Cholesky factor of F_t P_t F_t^T + Q (:py:func:`_joseph_update`),
+    which is the same matrix in exact arithmetic and positive semi-definite
+    by construction in floating point; dynamax adds 1e-9 to the diagonal of
+    that matrix before its solve, and here it is factored as it is. The
+    random draws are dynamax's.
+
+    Parameters
+    ----------
+    key: jr.PRNGKey
+        Random seed.
+    params: dynamax ParamsNLGSSM
+        Model parameters. The dynamics and emission functions take the
+        state and the frame's input.
+    emissions: jax.Array with shape (T, obs_dim)
+        Observations.
+    inputs: jax.Array with shape (T, ...)
+        Each frame's input to the dynamics and emission functions.
+
+    Returns
+    -------
+    xs: jax.Array with shape (T, state_dim)
+        Sampled latent states.
+    """
+    num_timesteps = len(emissions)
+    means, covs = extended_kalman_filter(params, emissions, inputs)
+    f = params.dynamics_function
+    F = jax.jacfwd(f)
+
+    def step(next_state, args):
+        key, m, P, t = args
+        Q = _nlgssm_param(params.dynamics_covariance, t)
+        u = inputs[t]
+        E, cov, _ = _joseph_update(P, F(m, u), Q)
+        state = MVN(m + E @ (next_state - f(m, u)), cov).sample(seed=key)
+        return state, state
+
+    key, this_key = jr.split(key, 2)
+    last_state = MVN(means[-1], covs[-1]).sample(seed=this_key)
+    _, states = lax.scan(
+        step,
+        last_state,
+        (
+            jr.split(key, num_timesteps - 1),
+            means[:-1],
+            covs[:-1],
+            jnp.arange(num_timesteps - 1),
+        ),
+        reverse=True,
+    )
+    return jnp.vstack([states, last_state])
+
+
 def ar_to_lds_emissions(Cd, R, y, m0, S0, nlags):
     """
     Given a linear dynamical system with L'th-order autoregressive

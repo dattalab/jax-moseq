@@ -8,6 +8,13 @@
 - ``resample_discrete_stateseqs`` draws the same states as TFP's per-state AR
   log likelihoods plus the heading and centroid log likelihoods, followed by
   the sampler.
+- The heading-and-centroid step stays finite in float32 at each segment's
+  first frame, where its initial variance of 1e4 meets keypoints tens of
+  pixels apart, and on masked frames, where its dynamics variance of 1e8
+  meets an observation variance of 1e-2.
+- In float64, ``extended_kalman_filter`` and ``extended_kalman_sample`` agree
+  with dynamax's extended Kalman filter and sampler, once dynamax's 1e-9
+  diagonal boost is removed, on the heading-and-centroid step's own models.
 """
 
 from functools import partial
@@ -23,6 +30,8 @@ import pytest  # noqa: E402
 
 from jax_moseq.models import allo_dynamics, allo_keypoint_slds, keypoint_slds  # noqa: E402
 from jax_moseq.models.allo_keypoint_slds import gibbs  # noqa: E402
+from jax_moseq.models.keypoint_slds.alignment import center_embedding  # noqa: E402
+from jax_moseq.utils import kalman  # noqa: E402
 from jax_moseq.utils.autoregression import ar_log_likelihood  # noqa: E402
 from jax_moseq.utils.distributions import sample_hmm_stateseq  # noqa: E402
 
@@ -172,3 +181,131 @@ def test_resample_discrete_stateseqs_draws_as_per_state_computation(data_and_mod
     )
     assert z.shape == (N_SEGMENTS, T - NLAGS)
     np.testing.assert_array_equal(z, expected)
+
+
+def heading_and_centroid_inputs(half_length, padded_frames):
+    """24 segments of 30 frames of a body of eight keypoints along a line
+    from -half_length to +half_length pixels, turning and moving, observed
+    with variances from 0.9 to 2.2. With padded_frames, the last
+    padded_frames frames of every other segment are masked and their
+    keypoints zero, as kpms pads the last segment of a recording. The pose
+    is the body itself: x is zero and Cd's offset maps to it."""
+    n, t, k, latent_dim, num_states = 24, 30, 8, 4, 3
+    rng = np.random.default_rng(0)
+    body = np.stack([np.linspace(-half_length, half_length, k), 0.1 * half_length * rng.standard_normal(k)], -1)
+    body -= body.mean(0)
+    Cd = np.zeros(((k - 1) * 2, latent_dim + 1))
+    Cd[:, -1] = (np.linalg.pinv(np.asarray(center_embedding(k))) @ body).ravel()
+    h = rng.uniform(-np.pi, np.pi, (n, 1)) + 0.05 * rng.standard_normal((n, t)).cumsum(1)
+    v = 200 + 2 * rng.standard_normal((n, t, 2)).cumsum(1)
+    rot = np.stack([np.cos(h), -np.sin(h), np.sin(h), np.cos(h)], -1).reshape(n, t, 2, 2)
+    gammasq = np.linspace(0.9, 2.2, n)
+    noise = np.sqrt(gammasq)[:, None, None, None] * rng.standard_normal((n, t, k, 2))
+    Y = np.einsum("ntij,kj->ntki", rot, body) + v[:, :, None] + noise
+    mask = np.ones((n, t))
+    if padded_frames:
+        mask[::2, t - padded_frames :] = 0
+        Y[mask == 0] = 0
+    return dict(
+        mask=mask, Y=Y, x=np.zeros((n, t, latent_dim)), z=np.zeros((n, t - NLAGS), int),
+        s=np.broadcast_to(gammasq[:, None, None], (n, t, k)).copy(), Cd=Cd, sigmasq=np.ones(k),
+        delta_h=np.zeros(num_states), sigmasq_h=np.full(num_states, 0.01),
+        delta_v=np.zeros((num_states, 2)), sigmasq_v=np.full(num_states, 4.0),
+    )
+
+
+def float32_heading_and_centroid_step(inputs):
+    with jax.enable_x64(False):
+        f32 = {k: jnp.asarray(v, jnp.int32 if k == "z" else jnp.float32) for k, v in inputs.items()}
+        h, v = gibbs.resample_heading_and_centroid(jr.PRNGKey(0), **f32)
+    assert h.dtype == v.dtype == jnp.float32
+    return np.asarray(h), np.asarray(v)
+
+
+def test_heading_and_centroid_step_is_finite_in_float32_at_each_segments_first_frame():
+    """Keypoints up to 40 pixels from the centroid, no masked frames. At the
+    first frame the initial variance of 1e4 meets observation variances near
+    1: dynamax's P - K S K^T leaves the float32 filtered covariance
+    indefinite, and its draws are non-finite in 23 of the 24 segments on CPU.
+    Conditioning in Joseph form with the gain solved through the Cholesky
+    factor of S = H P H^T + R still leaves 5 non-finite, because S's
+    eigenvalues span more than float32 resolves and its factor is NaN."""
+    h, v = float32_heading_and_centroid_step(heading_and_centroid_inputs(40, 0))
+    assert np.isfinite(h).all() and np.isfinite(v).all()
+
+
+def test_heading_and_centroid_step_is_finite_in_float32_on_masked_frames():
+    """Keypoints up to 4 pixels from the centroid, whose first frames
+    dynamax's float32 filter conditions without trouble; the last 10 frames
+    of every other segment are masked. On a masked frame the dynamics
+    variance of 1e8 meets an observation variance of 1e-2, and dynamax's
+    float32 sampler returns non-finite draws for all 12 padded segments, as
+    does the Joseph form with the gain solved through S's Cholesky factor."""
+    h, v = float32_heading_and_centroid_step(heading_and_centroid_inputs(4, 10))
+    assert np.isfinite(h).all() and np.isfinite(v).all()
+
+
+def _without_boost(A, b, diagonal_boost=1e-9):
+    from jax.scipy.linalg import cho_factor, cho_solve
+    from dynamax.utils.utils import symmetrize
+
+    return cho_solve(cho_factor(symmetrize(A)), b)
+
+
+def heading_and_centroid_models(data_and_model):
+    """The (params, emissions, inputs) the heading-and-centroid step gives
+    its extended Kalman sampler, one per segment, for the module's data
+    (2D, with masked frames in one segment) and init model."""
+    data, model = data_and_model
+    captured = []
+
+    def capture(key, params, emissions, inputs):
+        captured.append((params, emissions, inputs))
+        return jnp.zeros((len(emissions), 3), emissions.dtype)
+
+    s, p = model["states"], model["params"]
+    Y = data["Y"][..., :2]
+    Y_bar = keypoint_slds.estimate_aligned(s["x"], p["Cd"], Y.shape[-2])[..., :2]
+    z = jnp.concatenate([jnp.repeat(s["z"][..., :1], NLAGS - 1, -1), s["z"]], -1)
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(gibbs, "extended_kalman_sample", capture)
+    try:
+        for i in range(N_SEGMENTS):
+            gibbs.perturb_heading_and_centroid(
+                jr.PRNGKey(i), data["mask"][i], Y[i], Y_bar[i], p["sigmasq"] * s["s"][i],
+                p["delta_h"][z[i]], p["sigmasq_h"][z[i]], p["delta_v"][z[i]], p["sigmasq_v"][z[i]],
+            )
+    finally:
+        monkeypatch.undo()
+    return captured
+
+
+def test_extended_kalman_filter_and_sampler_agree_with_dynamax_in_float64(data_and_model, monkeypatch):
+    """Same models and keys: filtered means and covariances, and draws, as
+    dynamax's once its 1e-9 diagonal boost of S is removed, to 1e-9 on
+    unmasked frames. On the masked frames, where S's eigenvalues span about
+    13 orders of magnitude, dynamax's solve through S is itself accurate
+    only to about 1e-6 in float64, and agreement is checked to 1e-5."""
+    from dynamax.nonlinear_gaussian_ssm import inference_ekf
+
+    data = data_and_model[0]
+    if data["Y"].shape[-1] == 3:
+        pytest.skip("the step builds the same 2D model from 3D keypoints")
+    models = heading_and_centroid_models(data_and_model)
+    monkeypatch.setattr(inference_ekf, "psd_solve", _without_boost)
+    for i, (params, emissions, inputs) in enumerate(models):
+        unmasked = np.asarray(data["mask"][i]) > 0
+        means, covs = kalman.extended_kalman_filter(params, emissions, inputs)
+        expected = inference_ekf.extended_kalman_filter(params, emissions, inputs=inputs)
+        key = jr.PRNGKey(10 + i)
+        draws = kalman.extended_kalman_sample(key, params, emissions, inputs)
+        expected_draws = inference_ekf.extended_kalman_posterior_sample(key, params, emissions, inputs=inputs)
+        assert draws.dtype == jnp.float64
+        pairs = [
+            (means, expected.filtered_means),
+            (covs, expected.filtered_covariances),
+            (draws, expected_draws),
+        ]
+        for frames, atol in [(unmasked, 1e-9), (~unmasked, 1e-5)]:
+            for ours, theirs in pairs:
+                np.testing.assert_allclose(np.asarray(ours)[frames], np.asarray(theirs)[frames], rtol=0, atol=atol)
