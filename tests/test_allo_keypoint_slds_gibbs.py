@@ -295,11 +295,14 @@ def test_extended_kalman_filter_and_sampler_agree_with_dynamax_in_float64(data_a
     monkeypatch.setattr(inference_ekf, "psd_solve", _without_boost)
     for i, (params, emissions, inputs) in enumerate(models):
         unmasked = np.asarray(data["mask"][i]) > 0
+        # the step gives the emission covariance as diagonal entries;
+        # dynamax takes full matrices
+        dense = params._replace(emission_covariance=jax.vmap(jnp.diag)(params.emission_covariance))
         means, covs = kalman.extended_kalman_filter(params, emissions, inputs)
-        expected = inference_ekf.extended_kalman_filter(params, emissions, inputs=inputs)
+        expected = inference_ekf.extended_kalman_filter(dense, emissions, inputs=inputs)
         key = jr.PRNGKey(10 + i)
         draws = kalman.extended_kalman_sample(key, params, emissions, inputs)
-        expected_draws = inference_ekf.extended_kalman_posterior_sample(key, params, emissions, inputs=inputs)
+        expected_draws = inference_ekf.extended_kalman_posterior_sample(key, dense, emissions, inputs=inputs)
         assert draws.dtype == jnp.float64
         pairs = [
             (means, expected.filtered_means),

@@ -207,12 +207,9 @@ def perturb_heading_and_centroid(
 
     Ytarg = Y.reshape(-1, Y.shape[-2] * 2)
 
-    emission_covariance = jnp.repeat(obs_variance, 2, axis=-1)[:, :, na]
-    emission_covariance *= jnp.eye(Ytarg.shape[-1])[na, :, :]
-    emission_covariance *= mask[..., na, na]
-    emission_covariance += (
-        1e-2 * (1 - mask[..., na, na]) * jnp.eye(Ytarg.shape[-1])[na, :, :]
-    )
+    # diagonal entries of each frame's emission covariance
+    emission_covariance = jnp.repeat(obs_variance, 2, axis=-1) * mask[..., na]
+    emission_covariance += 1e-2 * (1 - mask[..., na])
 
     dynamics_covariance = (
         jnp.vstack([sigmasq_h, sigmasq_v, sigmasq_v]).T[:, :, na] * jnp.eye(3)[na, :, :]

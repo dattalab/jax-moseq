@@ -462,8 +462,9 @@ def _joseph_update_information(P, H, R):
         Prior covariance of the state.
     H: jax.Array with shape (obs_dim, state_dim)
         Observation matrix.
-    R: jax.Array with shape (obs_dim, obs_dim)
-        Observation noise covariance.
+    R: jax.Array with shape (obs_dim,) or (obs_dim, obs_dim)
+        Observation noise covariance, as its diagonal entries or as a full
+        matrix.
 
     Returns
     -------
@@ -474,15 +475,20 @@ def _joseph_update_information(P, H, R):
     """
     eye = jnp.eye(P.shape[-1], dtype=P.dtype)
     P_inv = cho_solve((jnp.linalg.cholesky(symmetrize(P)), True), eye)
-    Rinv_H = cho_solve((jnp.linalg.cholesky(symmetrize(R)), True), H)
+    if R.ndim == 1:
+        Rinv_H = H / R[:, na]
+    else:
+        Rinv_H = cho_solve((jnp.linalg.cholesky(symmetrize(R)), True), H)
     information = symmetrize(P_inv + H.T @ Rinv_H)
     K = cho_solve((jnp.linalg.cholesky(information), True), Rinv_H.T)
     I_KH = eye - K @ H
-    return K, symmetrize(I_KH @ P @ I_KH.T + K @ R @ K.T)
+    KRK = (K * R) @ K.T if R.ndim == 1 else K @ R @ K.T
+    return K, symmetrize(I_KH @ P @ I_KH.T + KRK)
 
 
 def _nlgssm_param(x, t):
-    """Frame t's covariance from an array of one per frame, or the shared one."""
+    """Frame t's dynamics covariance from an array of one per frame, or the
+    shared one."""
     return x[t] if x.ndim == 3 else x
 
 
@@ -511,7 +517,9 @@ def extended_kalman_filter(params, emissions, inputs):
     ----------
     params: dynamax ParamsNLGSSM
         Model parameters. The dynamics and emission functions take the
-        state and the frame's input.
+        state and the frame's input. The emission covariance is given per
+        frame, as diagonal entries, shape (T, obs_dim), or as full
+        matrices, shape (T, obs_dim, obs_dim).
     emissions: jax.Array with shape (T, obs_dim)
         Observations.
     inputs: jax.Array with shape (T, ...)
@@ -530,7 +538,7 @@ def extended_kalman_filter(params, emissions, inputs):
     def step(carry, t):
         mean, cov = carry
         Q = _nlgssm_param(params.dynamics_covariance, t)
-        R = _nlgssm_param(params.emission_covariance, t)
+        R = params.emission_covariance[t]
         u = inputs[t]
         K, cov = _joseph_update_information(cov, H(mean, u), R)
         mean = mean + K @ (emissions[t] - h(mean, u))
@@ -567,8 +575,7 @@ def extended_kalman_sample(key, params, emissions, inputs):
     key: jr.PRNGKey
         Random seed.
     params: dynamax ParamsNLGSSM
-        Model parameters. The dynamics and emission functions take the
-        state and the frame's input.
+        Model parameters, as :py:func:`extended_kalman_filter` takes them.
     emissions: jax.Array with shape (T, obs_dim)
         Observations.
     inputs: jax.Array with shape (T, ...)
