@@ -11,6 +11,7 @@ from jax_moseq.utils import (
     nan_check,
     mixed_map,
 )
+from jax_moseq.utils.precision import full_float32_matmuls
 
 from jax_moseq.utils import convert_data_precision
 from jax_moseq.utils.distributions import (
@@ -100,6 +101,7 @@ def resample_discrete_stateseqs(seed, x, mask, Ab, Q, pi, **kwargs):
 
 
 @jax.jit
+@full_float32_matmuls
 def stateseq_marginals(x, mask, Ab, Q, pi, **kwargs):
     """
     Computes the marginal probability of each discrete state at each time step.
@@ -137,6 +139,7 @@ def stateseq_marginals(x, mask, Ab, Q, pi, **kwargs):
 
 
 @jax.jit
+@full_float32_matmuls
 def stateseq_mode(x, mask, Ab, Q, pi, **kwargs):
     """Most probable state sequence at each time step.
 
@@ -521,6 +524,7 @@ def _resample_regression_params(nu_0, S_0, M_0, K_0, args):
     return sample_mniw(seed, nu_0 + n, S_n, M_n, K_n)
 
 
+@full_float32_matmuls
 def resample_model(
     data, seed, states, params, hypparams, states_only=False, verbose=False, **kwargs
 ):

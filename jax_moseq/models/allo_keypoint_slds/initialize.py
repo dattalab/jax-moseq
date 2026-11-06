@@ -4,11 +4,13 @@ import jax.random as jr
 from functools import partial
 
 from jax_moseq import utils
+from jax_moseq.utils.precision import full_float32_matmuls
 from jax_moseq.utils.distributions import sample_inv_gamma
 from jax_moseq.models import keypoint_slds
 from jax_moseq.models.allo_dynamics import init_allocentric_dynamics_params
 
 
+@full_float32_matmuls
 def init_model(
     data=None,
     hypparams=None,

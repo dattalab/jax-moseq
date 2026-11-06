@@ -9,7 +9,6 @@ from dynamax.linear_gaussian_ssm.parallel_inference import (
     _get_one_param,
 )
 from dynamax.linear_gaussian_ssm.inference import (
-    _condition_on,
     _get_params,
     _predict,
     ParamsLGSSM,
@@ -629,9 +628,9 @@ def ar_to_lds_emissions(Cd, R, y, m0, S0, nlags):
         Dimension-wise observation covariances
     y:  jax array, shape (T, D_obs)
         Observations
-    m0: jax array, shape (D)
+    m0: jax array, shape (D*L)
         Initial state distribution mean
-    S0: jax array, shape (D, D)
+    S0: jax array, shape (D*L, D*L)
         Initial state distribution cov
     nlags: Number of autoregressive lags
 
@@ -642,7 +641,10 @@ def ar_to_lds_emissions(Cd, R, y, m0, S0, nlags):
     R_: jax array, shape (T, D_obs)
     y_: jax array, shape (T, D_obs)
     m0_: jax array, shape (D*L)
+        Mean of the initial state given frames 0 to L-2
     S0_: jax array, shape (D*L, D*L)
+        Covariance of the initial state given frames 0 to L-2, conditioned
+        in Joseph form (:py:func:`_joseph_update`)
     """
     obs_dim = y.shape[-1]
     latent_dim = Cd.shape[-1] - 1
@@ -662,13 +664,10 @@ def ar_to_lds_emissions(Cd, R, y, m0, S0, nlags):
             l * obs_dim : (l + 1) * obs_dim, l * latent_dim : (l + 1) * latent_dim
         ].set(C)
     d0 = jnp.tile(d_, (nlags - 1,))
-    D0 = jnp.zeros((obs_dim * (nlags - 1), 2))
-    u0 = jnp.zeros(
-        2,
-    )
-    R0 = jnp.diag(R[: nlags - 1, :].reshape(-1))
+    R0 = R[: nlags - 1, :].reshape(-1)
     y0 = y[: nlags - 1, :].reshape(-1)
-    m0_, S0_ = _condition_on(m0, S0, C0, D0, d0, R0, u0, y0)
+    K0, S0_ = _joseph_update(S0, C0, R0)[:2]
+    m0_ = m0 + K0 @ (y0 - d0 - C0 @ m0)
 
     return C_, d_, R_, y_, m0_, S0_
 

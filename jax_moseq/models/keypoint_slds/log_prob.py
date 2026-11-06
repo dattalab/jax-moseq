@@ -3,6 +3,7 @@ import jax.numpy as jnp
 import tensorflow_probability.substrates.jax.distributions as tfd
 
 from jax_moseq.models import arhmm, slds
+from jax_moseq.utils.precision import full_float32_matmuls
 from jax_moseq.models.keypoint_slds.alignment import estimate_coordinates
 
 na = jnp.newaxis
@@ -67,6 +68,7 @@ def obs_log_prob(Y, x, v, h, s, Cd, sigmasq, **kwargs):
 
 
 @jax.jit
+@full_float32_matmuls
 def log_joint_likelihood(
     Y, mask, x, v, h, s, z, pi, Ab, Q, Cd, sigmasq, sigmasq_loc, s_0, nu_s, **kwargs
 ):
@@ -126,6 +128,7 @@ def log_joint_likelihood(
     return ll
 
 
+@full_float32_matmuls
 def model_likelihood(data, states, params, hypparams, noise_prior, **kwargs):
     """
     Convenience class that invokes `log_joint_likelihood`.

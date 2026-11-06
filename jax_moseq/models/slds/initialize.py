@@ -9,6 +9,7 @@ from jax_moseq.utils import (
     fit_pca,
     check_precision,
 )
+from jax_moseq.utils.precision import full_float32_matmuls
 
 from jax_moseq.models import arhmm
 from jax_moseq.models.slds.gibbs import resample_scales
@@ -178,6 +179,7 @@ def init_hyperparams(trans_hypparams, ar_hypparams, obs_hypparams, **kwargs):
     return hyperparams
 
 
+@full_float32_matmuls
 def init_model(
     data=None,
     states=None,

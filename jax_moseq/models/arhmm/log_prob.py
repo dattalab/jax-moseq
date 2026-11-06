@@ -7,6 +7,7 @@ from jax_moseq.utils.autoregression import (
     ar_log_likelihood,
     ar_log_likelihoods,
 )
+from jax_moseq.utils.precision import full_float32_matmuls
 from jax_moseq.utils.distributions import hmm_marginal_log_likelihood
 from functools import partial
 
@@ -62,6 +63,7 @@ def continuous_stateseq_log_prob(x, z, Ab, Q, **kwargs):
 
 
 @jax.jit
+@full_float32_matmuls
 def log_joint_likelihood(x, mask, z, pi, Ab, Q, **kwargs):
     """
     Calculate the total log probability for each latent state
@@ -100,6 +102,7 @@ def log_joint_likelihood(x, mask, z, pi, Ab, Q, **kwargs):
     return ll
 
 
+@full_float32_matmuls
 def model_likelihood(data, states, params, hypparams=None, **kwargs):
     """
     Convenience function that invokes :py:func:`jax_moseq.models.arhmm.log_prob.log_joint_likelihood`.
@@ -151,6 +154,7 @@ def state_cross_likelihoods(params, states, mask, **kwargs):
 
 
 @jax.jit
+@full_float32_matmuls
 def marginal_log_likelihood(mask, x, Ab, Q, pi, **kwargs):
     """Marginal log likelihood of continuous latents given model parameters.
 

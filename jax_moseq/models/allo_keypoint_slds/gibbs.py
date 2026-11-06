@@ -7,6 +7,7 @@ na = jnp.newaxis
 import time
 
 from jax_moseq.models import keypoint_slds, arhmm, allo_dynamics
+from jax_moseq.utils.precision import full_float32_matmuls
 from jax_moseq.utils import convert_data_precision, mixed_map
 from jax_moseq.utils.autoregression import (
     get_nlags,
@@ -103,6 +104,7 @@ def resample_discrete_stateseqs(
 
 
 @jax.jit
+@full_float32_matmuls
 def stateseq_marginals(
     x, h, v, mask, Ab, Q, delta_h, sigmasq_h, delta_v, sigmasq_v, pi, **kwargs
 ):
@@ -337,6 +339,7 @@ def resample_heading_and_centroid(
     return h, v
 
 
+@full_float32_matmuls
 def resample_model(
     data,
     seed,
