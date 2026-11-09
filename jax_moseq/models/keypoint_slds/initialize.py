@@ -3,6 +3,7 @@ import jax.numpy as jnp
 import jax.random as jr
 
 from jax_moseq import utils
+from jax_moseq.utils.precision import full_float32_matmuls
 from jax_moseq.utils import jax_io, device_put_as_scalar, check_precision
 
 from jax_moseq.models import arhmm, slds
@@ -141,6 +142,7 @@ def init_hyperparams(
     return hyperparams
 
 
+@full_float32_matmuls
 def init_model(
     data=None,
     states=None,

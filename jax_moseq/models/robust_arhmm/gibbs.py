@@ -4,14 +4,15 @@ import jax.random as jr
 
 from functools import partial
 
-from dynamax.hidden_markov_model.inference import (
-    hmm_posterior_mode,
-    hmm_smoother,
-)
+from dynamax.hidden_markov_model.inference import hmm_posterior_mode
 
 from jax_moseq.utils import pad_affine, psd_inv, psd_solve, nan_check, mixed_map
 from jax_moseq.utils import convert_data_precision
-from jax_moseq.utils.distributions import sample_mniw, sample_hmm_stateseq
+from jax_moseq.utils.distributions import (
+    hmm_smoothed_marginals,
+    sample_mniw,
+    sample_hmm_stateseq,
+)
 from jax_moseq.utils.autoregression import get_lags, get_nlags
 from jax_moseq.utils.transitions import resample_hdp_transitions
 
@@ -79,18 +80,14 @@ def stateseq_marginals(x, mask, Ab, Q, nu, pi, **kwargs):
         Marginal probability of each discrete state at each time step.
     """
     nlags = get_nlags(Ab)
-    num_states = pi.shape[0]
 
-    initial_distribution = jnp.ones(num_states) / num_states
     log_likelihoods = jax.lax.map(
         partial(robust_ar_log_likelihood, x), (Ab, Q, nu)
     )
     log_likelihoods = jnp.moveaxis(log_likelihoods, 0, -1)
     masked_log_likelihoods = log_likelihoods * mask[:, nlags:, na]
 
-    smoother = lambda lls: hmm_smoother(
-        initial_distribution, pi, lls
-    ).smoothed_probs
+    smoother = lambda lls: hmm_smoothed_marginals(pi, lls)
     return mixed_map(smoother)(masked_log_likelihoods)
 
 

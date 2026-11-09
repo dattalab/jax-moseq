@@ -1,8 +1,10 @@
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+import tensorflow_probability.substrates.jax.distributions as tfd
 from functools import partial
 from jax_moseq.utils import mixed_map, apply_affine
+from jax_moseq.utils.precision import full_float32_matmuls
 from jax_moseq.models import arhmm
 from jax_moseq.utils.kalman import (
     kalman_sample,
@@ -355,8 +357,12 @@ def _resample_spread(seed, degs, variance):
     spread : jax array, same shape as `variance`
         Resampled noise values.
     """
-    # same as sample_scaled_inv_chi2(seed, degs, variance / degs)
-    return variance / jr.gamma(seed, degs / 2, shape=variance.shape) / 2
+    # same as sample_scaled_inv_chi2(seed, degs, variance / degs). TFP's gamma
+    # sampler is much faster than jr.gamma on CPU; it samples in its
+    # parameters' dtype, so they are given in the variance's.
+    a = jnp.asarray(degs / 2, variance.dtype)
+    gamma = tfd.Gamma(a, jnp.ones((), variance.dtype))
+    return variance / gamma.sample(variance.shape, seed=seed) / 2
 
 
 @jax.jit
@@ -389,6 +395,7 @@ def compute_squared_error(Y, x, Cd, mask=None):
     return sqerr
 
 
+@full_float32_matmuls
 def resample_model(
     data,
     seed,

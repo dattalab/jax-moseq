@@ -4,7 +4,8 @@ import jax.random as jr
 from functools import partial
 
 from jax_moseq.utils.kalman import kalman_sample
-from jax_moseq.utils.distributions import sample_vonmises_fisher
+from jax_moseq.utils.precision import full_float32_matmuls
+from jax_moseq.utils.distributions import sample_vonmises, sample_vonmises_fisher
 
 from jax_moseq.models import arhmm, slds
 from jax_moseq.models.keypoint_slds.alignment import (
@@ -64,9 +65,10 @@ def resample_continuous_stateseqs(
     jitter : float, default=1e-3
         Amount to boost the diagonal of the covariance matrix
         during backward-sampling of the continuous states.
-    parallel_message_passing : bool, default=True,
+    parallel_message_passing : bool, default=True
         Use associative scan for Kalman sampling, which is faster on
-        a GPU but has a significantly longer jit time.
+        a GPU but has a significantly longer jit time. A Python bool,
+        since it selects the compiled program.
     **kwargs : dict
         Overflow, for convenience.
 
@@ -75,6 +77,15 @@ def resample_continuous_stateseqs(
     x : jax array of shape (N, T, latent_dim)
         Latent trajectories.
     """
+    return _resample_continuous_stateseqs(
+        seed, Y, mask, v, h, s, z, Cd, sigmasq, Ab, Q, jitter, parallel_message_passing
+    )
+
+
+@partial(jax.jit, static_argnames=("parallel_message_passing",))
+def _resample_continuous_stateseqs(
+    seed, Y, mask, v, h, s, z, Cd, sigmasq, Ab, Q, jitter, parallel_message_passing
+):
     Y, s, Cd, sigmasq = to_vanilla_slds(Y, v, h, s, Cd, sigmasq)
     x = slds.resample_continuous_stateseqs(
         seed,
@@ -247,13 +258,15 @@ def resample_heading(seed, Y, x, v, s, Cd, sigmasq, **kwargs):
     kappa_sin = S[..., 0, 1] - S[..., 1, 0]
     del S
 
-    mean_direction = jnp.stack([kappa_cos, kappa_sin], axis=-1)
-    sampled_direction = sample_vonmises_fisher(seed, mean_direction)
-    h = vector_to_angle(sampled_direction)
+    # The angle of a von Mises-Fisher draw on the circle is von Mises
+    # distributed, with the mean direction's angle and length.
+    mean_angle = jnp.arctan2(kappa_sin, kappa_cos)
+    concentration = jnp.sqrt(kappa_cos**2 + kappa_sin**2)
+    h = sample_vonmises(seed, mean_angle, concentration)
     return h
 
 
-@jax.jit
+@partial(jax.jit, static_argnames=("parallel_message_passing",))
 def resample_location(
     seed,
     Y,
@@ -290,9 +303,10 @@ def resample_location(
         Unscaled noise.
     sigmasq_loc : float
         Assumed variance in centroid displacements.
-    parallel_message_passing : bool, default=True,
+    parallel_message_passing : bool, default=True
         Use associative scan for Kalman sampling, which is faster on
-        a GPU but has a significantly longer jit time.
+        a GPU but has a significantly longer jit time. A Python bool,
+        since it selects the compiled program.
     **kwargs : dict
         Overflow, for convenience.
 
@@ -320,7 +334,7 @@ def resample_location(
     Q = jnp.eye(d)[na] * sigmasq_loc
     C = jnp.eye(d)
     D = jnp.zeros(d)
-    R = jnp.repeat(gammasq, d, axis=-1)
+    R = gammasq[..., na] * jnp.eye(d, dtype=gammasq.dtype)
     zz = jnp.zeros_like(mask[:, 1:], dtype=int)
 
     masked_dynamics_noise = sigmasq_loc * 10
@@ -332,7 +346,7 @@ def resample_location(
         "cov": jnp.eye(d) * masked_dynamics_noise,
     }
 
-    masked_obs_noise_diag = jnp.ones(d) * masked_obs_noise
+    masked_obs_noise_cov = jnp.eye(d, dtype=sigmasq.dtype) * masked_obs_noise
 
     in_axes = (0, 0, 0, 0, na, na, na, na, na, na, na, 0, na, na)
     v = jax.vmap(partial(kalman_sample, parallel=parallel_message_passing), in_axes)(
@@ -349,11 +363,12 @@ def resample_location(
         D,
         R,
         masked_dynamics_params,
-        masked_obs_noise_diag,
+        masked_obs_noise_cov,
     )
     return v
 
 
+@full_float32_matmuls
 def resample_model(
     data,
     seed,
@@ -368,7 +383,7 @@ def resample_model(
     fix_heading=False,
     verbose=False,
     jitter=1e-3,
-    parallel_message_passing=False,
+    parallel_message_passing=None,
     **kwargs
 ):
     """
@@ -404,9 +419,12 @@ def resample_model(
         during backward-sampling of the continuous states.
     verbose : bool, default=False
         Whether to print progress info during resampling.
-    parallel_message_passing : bool, default=True,
-        Use associative scan for Kalman sampling, which is faster on
-        a GPU but has a significantly longer jit time.
+    parallel_message_passing : bool, optional
+        Use associative scan for the Kalman sampling of the continuous
+        states and the centroid, which is faster on a GPU but has a
+        significantly longer jit time. If not given, the continuous
+        states use the sequential sampler and the centroid the
+        associative scan.
 
     Returns
     ------
@@ -414,6 +432,10 @@ def resample_model(
         Dictionary containing the hyperparameters and
         updated seed, states, and parameters of the model.
     """
+    # Without an explicit choice, the continuous states use the sequential
+    # Kalman sampler and the centroid the parallel one.
+    parallel_x = bool(parallel_message_passing)
+    parallel_v = True if parallel_message_passing is None else parallel_message_passing
     model = arhmm.resample_model(
         data, seed, states, params, hypparams, states_only, verbose=verbose
     )
@@ -445,7 +467,7 @@ def resample_model(
         **states,
         **params,
         jitter=jitter,
-        parallel_message_passing=parallel_message_passing
+        parallel_message_passing=parallel_x
     )
 
     if not fix_heading:
@@ -456,7 +478,12 @@ def resample_model(
     if verbose:
         print("Resampling v (location)")
     states["v"] = resample_location(
-        seed, **data, **states, **params, **hypparams["cen_hypparams"]
+        seed,
+        **data,
+        **states,
+        **params,
+        **hypparams["cen_hypparams"],
+        parallel_message_passing=parallel_v
     )
 
     if resample_local_noise_scale:

@@ -7,21 +7,23 @@ na = jnp.newaxis
 import time
 
 from jax_moseq.models import keypoint_slds, arhmm, allo_dynamics
+from jax_moseq.utils.precision import full_float32_matmuls
 from jax_moseq.utils import convert_data_precision, mixed_map
-from jax_moseq.utils.autoregression import get_nlags, ar_log_likelihood
+from jax_moseq.utils.autoregression import (
+    get_nlags,
+    ar_log_likelihood,
+    ar_log_likelihoods,
+)
 from jax_moseq.models.keypoint_slds import (
     angle_to_rotation_matrix,
     estimate_aligned,
     apply_rotation,
 )
 
-from jax_moseq.utils.distributions import sample_hmm_stateseq
+from jax_moseq.utils.distributions import hmm_smoothed_marginals, sample_hmm_stateseq
+from jax_moseq.utils.kalman import extended_kalman_sample
 
-from dynamax.hidden_markov_model.inference import hmm_smoother
-from dynamax.nonlinear_gaussian_ssm import (
-    ParamsNLGSSM,
-    extended_kalman_posterior_sample,
-)
+from dynamax.nonlinear_gaussian_ssm import ParamsNLGSSM
 
 
 def _stateseq_log_likelihoods(
@@ -38,8 +40,10 @@ def _stateseq_log_likelihoods(
     nlags = get_nlags(Ab)
     ll_fun = jax.vmap(partial(allo_dynamics.allo_log_likelihood, h, v[..., :2]))
     log_likelihoods = ll_fun(delta_h, sigmasq_h, delta_v, sigmasq_v)[..., nlags - 1 :]
-    log_likelihoods += jax.lax.map(partial(ar_log_likelihood, x), (Ab, Q))
-    return jnp.moveaxis(log_likelihoods, 0, -1)
+    log_likelihoods = jnp.moveaxis(log_likelihoods, 0, -1)
+    # AR log likelihoods one segment at a time, so only one segment's whitened
+    # residuals are held at once
+    return log_likelihoods + jax.lax.map(lambda x: ar_log_likelihoods(x, Ab, Q), x)
 
 
 @jax.jit
@@ -100,6 +104,7 @@ def resample_discrete_stateseqs(
 
 
 @jax.jit
+@full_float32_matmuls
 def stateseq_marginals(
     x, h, v, mask, Ab, Q, delta_h, sigmasq_h, delta_v, sigmasq_v, pi, **kwargs
 ):
@@ -142,15 +147,13 @@ def stateseq_marginals(
         Marginal probability of each discrete state at each time step.
     """
     nlags = get_nlags(Ab)
-    num_states = pi.shape[0]
 
-    initial_distribution = jnp.ones(num_states) / num_states
     log_likelihoods = _stateseq_log_likelihoods(
         x, h, v, Ab, Q, delta_h, sigmasq_h, delta_v, sigmasq_v
     )
     masked_log_likelihoods = log_likelihoods * mask[:, nlags:, na]
 
-    smoother = lambda lls: hmm_smoother(initial_distribution, pi, lls).smoothed_probs
+    smoother = lambda lls: hmm_smoothed_marginals(pi, lls)
     return mixed_map(smoother)(masked_log_likelihoods)
 
 
@@ -182,6 +185,14 @@ def perturb_heading_and_centroid(
 
     h[t] = h[t-1] + delta_h[z_t] + N(0, sigmasq_h[z_t])
     v[t] = v[t-1] + R(h[t-1])^T delta_v[z_t] + N(0, sigmasq_v[z_t] I_2)
+
+    The draw is :py:func:`jax_moseq.utils.kalman.extended_kalman_sample`,
+    which conditions in Joseph form with the gain computed in information
+    form, so the filtered covariances stay positive semi-definite in
+    float32 at each segment's first frame, where the initial variance of
+    1e4 meets keypoints tens of pixels from the centroid, and on masked
+    frames, where a dynamics variance of 1e8 meets an observation variance
+    of 1e-2. The emission covariance is passed as its diagonal entries.
     """
 
     def dynamics_function(hv, t):
@@ -199,12 +210,9 @@ def perturb_heading_and_centroid(
 
     Ytarg = Y.reshape(-1, Y.shape[-2] * 2)
 
-    emission_covariance = jnp.repeat(obs_variance, 2, axis=-1)[:, :, na]
-    emission_covariance *= jnp.eye(Ytarg.shape[-1])[na, :, :]
-    emission_covariance *= mask[..., na, na]
-    emission_covariance += (
-        1e-2 * (1 - mask[..., na, na]) * jnp.eye(Ytarg.shape[-1])[na, :, :]
-    )
+    # diagonal entries of each frame's emission covariance
+    emission_covariance = jnp.repeat(obs_variance, 2, axis=-1) * mask[..., na]
+    emission_covariance += 1e-2 * (1 - mask[..., na])
 
     dynamics_covariance = (
         jnp.vstack([sigmasq_h, sigmasq_v, sigmasq_v]).T[:, :, na] * jnp.eye(3)[na, :, :]
@@ -221,12 +229,12 @@ def perturb_heading_and_centroid(
         emission_covariance=emission_covariance,
     )
 
-    hv = extended_kalman_posterior_sample(seed, params, Ytarg, jnp.arange(len(mask)))
+    hv = extended_kalman_sample(seed, params, Ytarg, jnp.arange(len(mask)))
     h, v = hv[:, 0], hv[:, 1:]
     return h, v
 
 
-@jax.jit
+@partial(jax.jit, static_argnames=("parallel_message_passing",))
 def resample_heading_and_centroid(
     seed,
     mask,
@@ -241,6 +249,7 @@ def resample_heading_and_centroid(
     delta_v,
     sigmasq_v,
     sigmasq_height=1,
+    parallel_message_passing=True,
     **kwargs
 ):
     """
@@ -274,6 +283,10 @@ def resample_heading_and_centroid(
         Variance of centroid change for each discrete state.
     sigmasq_height : float, default=1
         Variance of height change on each step.
+    parallel_message_passing : bool, default=True
+        Use associative scan for Kalman sampling, which is faster on
+        a GPU but has a significantly longer jit time. A Python bool,
+        since it selects the compiled program.
     **kwargs : dict
         Overflow, for convenience.
 
@@ -310,13 +323,23 @@ def resample_heading_and_centroid(
     if Y.shape[-1] == 3:
         seed = jr.split(seed)[0]
         v_height = keypoint_slds.resample_location(
-            seed, Y, mask, x, h, s, Cd, sigmasq, sigmasq_height
+            seed,
+            Y,
+            mask,
+            x,
+            h,
+            s,
+            Cd,
+            sigmasq,
+            sigmasq_height,
+            parallel_message_passing=parallel_message_passing,
         )[..., 2:]
         v = jnp.concatenate([v, v_height], axis=-1)
 
     return h, v
 
 
+@full_float32_matmuls
 def resample_model(
     data,
     seed,
@@ -330,7 +353,7 @@ def resample_model(
     ignore_allo_dynamics_for_location_sampling=False,
     verbose=False,
     jitter=0,
-    parallel_message_passing=False,
+    parallel_message_passing=None,
     **kwargs
 ):
     """
@@ -364,9 +387,12 @@ def resample_model(
         during backward-sampling of the continuous states.
     verbose : bool, default=False
         Whether to print progress info during resampling.
-    parallel_message_passing : bool, default=False
-        Use associative scan for Kalman sampling, which is faster on
-        a GPU but has a significantly longer jit time.
+    parallel_message_passing : bool, optional
+        Use associative scan for the Kalman sampling of the continuous
+        states and the centroid, which is faster on a GPU but has a
+        significantly longer jit time. If not given, the continuous
+        states use the sequential sampler and the centroid the
+        associative scan.
 
     Returns
     ------
@@ -374,6 +400,11 @@ def resample_model(
         Dictionary containing the hyperparameters and
         updated seed, states, and parameters of the model.
     """
+    # Without an explicit choice, the continuous states use the sequential
+    # Kalman sampler and the centroid the parallel one.
+    parallel_x = bool(parallel_message_passing)
+    parallel_v = True if parallel_message_passing is None else parallel_message_passing
+
     seed = jr.split(seed)[1]
     params = params.copy()
     states = states.copy()
@@ -427,7 +458,7 @@ def resample_model(
             **states,
             **params,
             jitter=jitter,
-            parallel_message_passing=parallel_message_passing
+            parallel_message_passing=parallel_x
         )
 
         if verbose:
@@ -437,11 +468,21 @@ def resample_model(
                 seed, **data, **states, **params
             )
             states["v"] = keypoint_slds.resample_location(
-                seed, **data, **states, **params, **hypparams["cen_hypparams"]
+                seed,
+                **data,
+                **states,
+                **params,
+                **hypparams["cen_hypparams"],
+                parallel_message_passing=parallel_v
             )
         else:
             states["h"], states["v"] = resample_heading_and_centroid(
-                seed, **data, **states, **params, **hypparams["allo_hypparams"]
+                seed,
+                **data,
+                **states,
+                **params,
+                **hypparams["allo_hypparams"],
+                parallel_message_passing=parallel_v
             )
 
         if not skip_noise:

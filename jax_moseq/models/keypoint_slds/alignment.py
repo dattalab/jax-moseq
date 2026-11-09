@@ -3,6 +3,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from jax_moseq import utils
+from jax_moseq.utils.precision import full_float32_matmuls
 from jax_moseq.utils import jax_io, apply_affine
 
 na = jnp.newaxis
@@ -149,6 +150,7 @@ def rigid_transform(Y, v, h):
 
 
 @jax.jit
+@full_float32_matmuls
 def inverse_rigid_transform(Y, v, h):
     """
     Apply the inverse of the rigid transform consisting of

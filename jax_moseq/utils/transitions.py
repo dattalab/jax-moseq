@@ -49,7 +49,17 @@ def count_transitions(num_states, stateseqs, mask):
     return transition_counts
 
 
-@njit
+def _njit_cached(func):
+    """numba's njit, with the compiled code cached on disk where numba can
+    write it (next to this module or in the user's cache directory), and
+    compiled in every process where it can't."""
+    try:
+        return njit(cache=True)(func)
+    except RuntimeError:  # no writable cache location
+        return njit(func)
+
+
+@_njit_cached
 def _sample_loyal_crf_table_counts(
     rng, customer_counts, dish_ratings, loyalty
 ):

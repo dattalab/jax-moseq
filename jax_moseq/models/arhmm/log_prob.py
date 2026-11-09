@@ -2,9 +2,13 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from functools import partial
-from jax_moseq.utils.autoregression import get_nlags, ar_log_likelihood
-from jax_moseq.utils import mixed_map
-from dynamax.hidden_markov_model.inference import hmm_filter
+from jax_moseq.utils.autoregression import (
+    get_nlags,
+    ar_log_likelihood,
+    ar_log_likelihoods,
+)
+from jax_moseq.utils.precision import full_float32_matmuls
+from jax_moseq.utils.distributions import hmm_marginal_log_likelihood
 from functools import partial
 
 na = jnp.newaxis
@@ -59,6 +63,7 @@ def continuous_stateseq_log_prob(x, z, Ab, Q, **kwargs):
 
 
 @jax.jit
+@full_float32_matmuls
 def log_joint_likelihood(x, mask, z, pi, Ab, Q, **kwargs):
     """
     Calculate the total log probability for each latent state
@@ -97,6 +102,7 @@ def log_joint_likelihood(x, mask, z, pi, Ab, Q, **kwargs):
     return ll
 
 
+@full_float32_matmuls
 def model_likelihood(data, states, params, hypparams=None, **kwargs):
     """
     Convenience function that invokes :py:func:`jax_moseq.models.arhmm.log_prob.log_joint_likelihood`.
@@ -148,6 +154,7 @@ def state_cross_likelihoods(params, states, mask, **kwargs):
 
 
 @jax.jit
+@full_float32_matmuls
 def marginal_log_likelihood(mask, x, Ab, Q, pi, **kwargs):
     """Marginal log likelihood of continuous latents given model parameters.
 
@@ -170,13 +177,14 @@ def marginal_log_likelihood(mask, x, Ab, Q, pi, **kwargs):
         Marginal log likelihood.
     """
     nlags = get_nlags(Ab)
-    num_states = pi.shape[0]
 
-    initial_distribution = jnp.ones(num_states) / num_states
-    log_likelihoods = jax.lax.map(partial(ar_log_likelihood, x), (Ab, Q))
-    log_likelihoods = jnp.moveaxis(log_likelihoods, 0, -1)
+    # one segment at a time, so only one segment's whitened residuals are
+    # held at once
+    log_likelihoods = jax.lax.map(lambda x: ar_log_likelihoods(x, Ab, Q), x)
     masked_log_likelihoods = log_likelihoods * mask[:, nlags:, None]
 
-    get_mll = lambda ll: hmm_filter(initial_distribution, pi, ll).marginal_loglik.sum()
-    mlls = mixed_map(get_mll)(masked_log_likelihoods)
+    get_mll = lambda ll: hmm_marginal_log_likelihood(pi, ll)
+    # all segments at once: the filter keeps at most one normalizer per
+    # frame, so mixed_map's passes would save little memory
+    mlls = jax.vmap(get_mll)(masked_log_likelihoods)
     return mlls.sum()

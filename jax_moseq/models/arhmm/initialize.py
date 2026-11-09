@@ -1,8 +1,10 @@
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+from functools import partial
 
 from jax_moseq.utils import device_put_as_scalar, check_precision
+from jax_moseq.utils.precision import full_float32_matmuls
 from jax_moseq.utils.transitions import init_hdp_transitions
 from jax_moseq.utils.distributions import sample_mniw
 
@@ -40,6 +42,12 @@ def init_ar_params(seed, *, num_states, nu_0, S_0, M_0, K_0, **kwargs):
     Q : jax array of shape (num_states, latent_dim, latent_dim)
         Autoregressive noise covariances.
     """
+    return _init_ar_params(seed, num_states, nu_0, S_0, M_0, K_0)
+
+
+@partial(jax.jit, static_argnums=(1,))
+def _init_ar_params(seed, num_states, nu_0, S_0, M_0, K_0):
+    # jitted: run eagerly, the vmapped MNIW draw compiles dozens of programs
     seeds = jr.split(seed, num_states)
     in_axes = (0, na, na, na, na)
     Ab, Q = jax.vmap(sample_mniw, in_axes)(seeds, nu_0, S_0, M_0, K_0)
@@ -138,6 +146,7 @@ def init_hyperparams(trans_hypparams, ar_hypparams, **kwargs):
     return {"trans_hypparams": trans_hypparams, "ar_hypparams": ar_hypparams}
 
 
+@full_float32_matmuls
 def init_model(
     data=None,
     states=None,
